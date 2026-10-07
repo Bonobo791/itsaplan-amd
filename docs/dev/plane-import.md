@@ -14,14 +14,16 @@ returns.
   local id mapping, the idempotency and resume primitive).
 - `apps/worker/src/{canonical,reader,import-sources,plane-adapter,import-store,import-worker}.ts`
   — the `SourceReader` port, the per-source registry the worker dispatches on
-  `import_job.source` through, the only implementation (Plane), and the phase state machine
+  `import_job.source` through, the Plane implementation, and the phase state machine
   (discover → create → link → rewrite → attachments → done) that drives a job one bounded chunk per
   tick.
 - `packages/storage` and `packages/db/src/domains/storage.ts` — object storage and upload
   limits, shared with `apps/api` so an imported attachment is held to the same rules an
   interactive upload is.
 - `apps/api/src/modules/import-export/` — create/test-connection/plane-preview/export/status/
-  pause/resume/cancel routes.
+  pause/resume/cancel routes, and linear-test-connection/linear-preview.
+- The Linear source (`linear-adapter.ts`, `linear-mapping.ts`, the api's `linear.ts`, the
+  Linear tab) has its own notes: [linear-import.md](linear-import.md).
 - `apps/web/src/features/settings/components/import-export/` — the Settings page.
 
 ## Export: a JSON snapshot, not a live sync
