@@ -256,6 +256,41 @@ describe('project transfers', () => {
     );
   });
 
+  it.each(['source', 'target', 'project'] as const)(
+    'enforces the %s MCP flag on transfers and retries',
+    async (flag) => {
+      const { user, api, source, target } = await setup();
+      const mcpApi = authedApi(user.cookie, { 'x-mcp-loopback': '1' });
+      const body = { projectId: source.id, sourceTeamId: source.teamId, targetTeamId: target.id };
+      async function setReach(enabled: boolean, moved = false) {
+        const teamId =
+          flag === 'target' || (flag === 'project' && moved) ? target.id : source.teamId;
+        const patch =
+          flag === 'project' ? { projects: [{ projectId: source.id, enabled }] } : { enabled };
+        expect((await api.teams({ teamId }).mcp.patch(patch)).status).toBe(200);
+      }
+      await setReach(false);
+      expect(
+        (
+          await mcpApi
+            .projects({ projectKey: source.ref })
+            .transfer.preview.post({ targetTeamId: target.id })
+        ).status,
+      ).toBe(403);
+      expect((await mcpApi.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(
+        403,
+      );
+      await setReach(true);
+      expect((await mcpApi.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(
+        200,
+      );
+      await setReach(false, true);
+      expect((await mcpApi.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(
+        403,
+      );
+    },
+  );
+
   it('rejects a destination in a different workspace', async () => {
     const { user, api, source } = await setup();
     setOwnedWorkspaceLimit(0);
