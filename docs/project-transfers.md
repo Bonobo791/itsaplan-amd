@@ -66,7 +66,9 @@ The transfer rechecks permissions and blockers in one transaction and locks the
 affected teams and project. It commits the role mappings and ownership change
 together. A failed transfer leaves the project unchanged. Database checks reject
 late writes that refer to source-team roles, members, agents, invitations, or
-repository connections. A conflict means the caller should preview again.
+repository connections. Action creation also checks the team seen during authorization
+under a project lock, so an action queued behind the transfer is rejected.
+A conflict means the caller should preview again.
 
 The REST endpoints are `POST /projects/:projectKey/transfer/preview` and
 `POST /projects/:projectKey/transfer`, with the same bodies except `projectKey`
