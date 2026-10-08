@@ -79,6 +79,20 @@ describe('project transfers', () => {
     );
   });
 
+  it('retries after the source team slug changes', async () => {
+    const { api, source, target } = await setup();
+    expect((await api.teams({ teamId: source.teamId }).patch({ slug: 'source' })).status).toBe(200);
+    const ref = `source.${source.key}`;
+    const body = { targetTeamId: target.id, sourceTeamId: source.teamId, projectId: source.id };
+    expect((await api.projects({ projectKey: ref }).transfer.post(body)).status).toBe(200);
+    expect(
+      (await api.teams({ teamId: source.teamId }).patch({ slug: 'renamed-source' })).status,
+    ).toBe(200);
+    const retry = await api.projects({ projectKey: ref }).transfer.post(body);
+    expect(retry.status).toBe(200);
+    expect(retry.data).toMatchObject({ id: source.id, teamId: target.id, ref: 'destination.MOVE' });
+  });
+
   it('blocks duplicate destination keys and leaves the source untouched', async () => {
     const { api, source, target } = await setup();
     await api.teams({ teamId: target.id }).projects.post({ key: 'MOVE', name: 'Existing' });
