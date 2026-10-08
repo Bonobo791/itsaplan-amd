@@ -46,11 +46,13 @@ import {
 } from './service';
 import { copyProject } from './copy';
 import { projectPreferences } from './preferences';
+import { projectTransfers } from './transfer-routes';
 
 export const projectRoutes = new Elysia({ name: 'projects', detail: { tags: ['Projects'] } })
   .use(authContext)
   .use(guards)
   .use(projectPreferences)
+  .use(projectTransfers)
   .get(
     '/projects',
     ({ user, request, query }) =>
