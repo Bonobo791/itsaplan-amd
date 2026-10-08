@@ -48,7 +48,8 @@ Call `transfer_project` with the IDs returned by the preview:
 Omit `roleMappings` when the preview reports no required roles. A successful call
 returns the project with its new `teamId` and `ref`. Use that reference for later
 calls. The same transfer request can be retried using the original reference and
-IDs, including if another project has since reused the old key. A project moved
+IDs, including if the source team slug has changed or another project has since
+reused the old key. A project moved
 to a different destination returns a conflict instead.
 
 ## Blockers and concurrent changes
@@ -67,7 +68,9 @@ affected teams and project. It commits the role mappings and ownership change
 together. A failed transfer leaves the project unchanged. Database checks reject
 late writes that refer to source-team roles, members, agents, invitations, or
 repository connections. Action creation also checks the team seen during authorization
-under a project lock, so an action queued behind the transfer is rejected.
+under a project lock, so an action queued behind the transfer is rejected. Project
+deletion checks that team under the lock before removing threads, project data, or
+stored objects; a deletion queued behind a transfer returns a conflict.
 A conflict means the caller should preview again.
 
 The REST endpoints are `POST /projects/:projectKey/transfer/preview` and

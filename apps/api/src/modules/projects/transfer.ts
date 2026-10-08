@@ -207,13 +207,13 @@ export async function transferProject(
       const original = await requireTransferTeam(tx, input.sourceTeamId, userId);
       if (mcpOnly && !original.mcpEnabled)
         throw new HttpError(403, 'MCP must be enabled on both teams');
-      const qualified = projectRef(original, current.key);
-      if (ref !== current.key && ref !== qualified && ref !== `${original.id}.${current.key}`)
-        throw new HttpError(409, 'The project reference and project ID do not match');
       if (current.teamId !== input.sourceTeamId && current.teamId !== input.targetTeamId)
         throw new HttpError(409, 'The project has moved to another team');
       const state = await checkTransfer(tx, current.id, input.targetTeamId, userId, mcpOnly);
       if (current.teamId === input.targetTeamId) return { current, target: state.target };
+      const qualified = projectRef(original, current.key);
+      if (ref !== current.key && ref !== qualified && ref !== `${original.id}.${current.key}`)
+        throw new HttpError(409, 'The project reference and project ID do not match');
       if (state.preview.blockers.length)
         throw new HttpError(
           409,
