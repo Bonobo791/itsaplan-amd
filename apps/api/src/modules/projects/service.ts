@@ -770,7 +770,6 @@ export async function deleteProject(
     if (!current) throw new HttpError(404, 'Project not found');
     if (expectedTeamId !== undefined && current.teamId !== expectedTeamId)
       throw new HttpError(409, 'The project has moved to another team');
-    await deleteThreadsWhere({ projectId });
     // SCIM team memberships must be reconciled after their project memberships disappear.
     const provisioned = await tx
       .select({ teamId: project.teamId, userId: projectMember.userId })
@@ -808,4 +807,7 @@ export async function deleteProject(
   for (const { teamId, userId } of provisioned) {
     await dropUnusedTeamMembership(teamId, userId);
   }
+  // Outside the transaction: the agent memory store may create its indexes
+  // concurrently on first use, which waits for this transaction to end.
+  await deleteThreadsWhere({ projectId });
 }
