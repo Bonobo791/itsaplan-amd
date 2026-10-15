@@ -1,7 +1,9 @@
+-- Instances that ran this migration under its earlier number 0147 already have the
+-- function and triggers, so it replaces them.
 -- A writer can validate the team before a transfer and commit afterwards. Check
 -- team-bound references against the final project owner, including at transaction
 -- commit: transfer remaps roles and changes the owner in the same transaction.
-CREATE FUNCTION check_project_team_reference() RETURNS trigger AS $$
+CREATE OR REPLACE FUNCTION check_project_team_reference() RETURNS trigger AS $$
 DECLARE
   r jsonb;
   owning_team integer;
@@ -58,29 +60,43 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS project_member_team_reference ON project_member;
+--> statement-breakpoint
 CREATE CONSTRAINT TRIGGER project_member_team_reference
   AFTER INSERT OR UPDATE ON project_member DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION check_project_team_reference();
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS team_invite_team_reference ON team_invite;
 --> statement-breakpoint
 CREATE CONSTRAINT TRIGGER team_invite_team_reference
   AFTER INSERT OR UPDATE ON team_invite DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION check_project_team_reference();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS agent_schedule_team_reference ON agent_schedule;
+--> statement-breakpoint
 CREATE CONSTRAINT TRIGGER agent_schedule_team_reference
   AFTER INSERT OR UPDATE ON agent_schedule DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION check_project_team_reference();
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS agent_run_team_reference ON agent_run;
 --> statement-breakpoint
 CREATE CONSTRAINT TRIGGER agent_run_team_reference
   AFTER INSERT OR UPDATE ON agent_run DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION check_project_team_reference();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS git_managed_repository_team_reference ON git_managed_repository;
+--> statement-breakpoint
 CREATE CONSTRAINT TRIGGER git_managed_repository_team_reference
   AFTER INSERT OR UPDATE ON git_managed_repository DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION check_project_team_reference();
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS scim_group_mapping_team_reference ON scim_group_mapping;
+--> statement-breakpoint
 CREATE CONSTRAINT TRIGGER scim_group_mapping_team_reference
   AFTER INSERT OR UPDATE ON scim_group_mapping DEFERRABLE INITIALLY DEFERRED
   FOR EACH ROW EXECUTE FUNCTION check_project_team_reference();
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS project_action_team_reference ON project_action;
 --> statement-breakpoint
 CREATE CONSTRAINT TRIGGER project_action_team_reference
   AFTER INSERT OR UPDATE ON project_action DEFERRABLE INITIALLY DEFERRED
