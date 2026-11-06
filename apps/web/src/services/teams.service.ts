@@ -5,13 +5,19 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { useTranslations } from 'next-intl';
 import {
   type InviteTeamRole,
   listTeamInvites,
+  listInviteCandidates,
   createTeamInvite,
+  renewTeamInvite,
+  sendTeamInviteEmail,
   deleteTeamInvite,
 } from '@/lib/api/endpoints/invites';
 import type { MemberKind, MemberListParams } from '@/lib/api/endpoints/members';
+import { getInviteSearch } from '@/lib/api/endpoints/settings';
 import {
   type TeamProjectListParams,
   type Team,
@@ -81,12 +87,13 @@ export function useTeamProjectsQuery(teamId: number, params: TeamProjectListPara
   });
 }
 
-// Every project the reader has in the team: the projects an agent is attached to,
-// and the MCP switches, both of which act on all of them rather than on a page.
-export function useTeamProjectOptionsQuery(teamId: number) {
+// Every project the reader has in the team, for the pickers and switches that act on all
+// of them rather than on a page. Null skips the request.
+export function useTeamProjectOptionsQuery(teamId: number | null) {
   return useQuery({
-    queryKey: qk.teamProjectOptions(teamId),
-    queryFn: () => listTeamProjectOptions(teamId),
+    queryKey: qk.teamProjectOptions(teamId ?? 0),
+    queryFn: () => listTeamProjectOptions(teamId!),
+    enabled: teamId != null,
   });
 }
 
@@ -253,14 +260,59 @@ export function useTeamInvitesQuery(teamId: number, enabled = true) {
   });
 }
 
+export function useInviteSearchQuery() {
+  return useQuery({ queryKey: qk.inviteSearch, queryFn: () => getInviteSearch() });
+}
+
+// The API answers only a search of at least 2 characters.
+export function useInviteCandidatesQuery(teamId: number, search: string) {
+  return useQuery({
+    queryKey: qk.inviteCandidates(teamId, search),
+    queryFn: () => listInviteCandidates(teamId, search),
+    enabled: search.length >= 2,
+    placeholderData: keepPreviousData,
+  });
+}
+
 // The invite dialog shows the reason under its address field, so this mutation opts
 // out of the global error toast.
 export function useCreateTeamInvite(teamId: number) {
+  const t = useTranslations('members.invites');
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: { email: string; role: InviteTeamRole }) => createTeamInvite(teamId, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.teamInvites(teamId) }),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: qk.teamInvites(teamId) });
+      if (result.emailQueued) toast.success(t('emailQueued'));
+      else if (result.emailFailed) toast.error(t('emailFailed'));
+      else toast.info(t('emailUnavailable'));
+    },
     meta: { suppressErrorToast: true },
+  });
+}
+
+export function useSendTeamInviteEmail(teamId: number) {
+  const t = useTranslations('members.invites');
+  return useMutation({
+    mutationFn: (inviteId: number) => sendTeamInviteEmail(teamId, inviteId),
+    onSuccess: (result) => {
+      if (result.emailQueued) toast.success(t('emailQueued'));
+      else toast.info(t('resendUnavailable'));
+    },
+  });
+}
+
+export function useRenewTeamInvite(teamId: number) {
+  const t = useTranslations('members.invites');
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: number) => renewTeamInvite(teamId, inviteId),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: qk.teamInvites(teamId) });
+      if (result.emailQueued) toast.success(t('renewed'));
+      else if (result.emailFailed) toast.error(t('renewedEmailFailed'));
+      else toast.info(t('renewedNoEmail'));
+    },
   });
 }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { api, authedApi } from '#tests/helpers/app';
+import { api, authedApi, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 
@@ -11,7 +11,7 @@ import { resetDb } from '#tests/helpers/db';
 async function setup() {
   const owner = await signUpTestUser();
   const asOwner = authedApi(owner.cookie);
-  await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   return { asOwner };
 }
 
@@ -129,6 +129,16 @@ describe('chat attachments', () => {
       contentType: 'text/csv',
     });
     expect(garbage.status).toBe(400);
+  });
+
+  it('rejects a content type that carries a second type', async () => {
+    const { asOwner } = await setup();
+    const res = await asOwner.projects({ projectKey: 'MKT' })['chat-attachments'].post({
+      filename: 'poc.html',
+      contentBase64: Buffer.from('<script>alert(1)</script>').toString('base64'),
+      contentType: 'image/png, text/html',
+    });
+    expect(res.status).toBe(400);
   });
 
   it('denies a non-member uploading or reading', async () => {

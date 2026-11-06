@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { authedApi } from '#tests/helpers/app';
+import { authedApi, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { createRole } from '#tests/helpers/roles';
@@ -9,7 +9,7 @@ type Client = ReturnType<typeof authedApi>;
 async function setupOwnerProject(): Promise<{ api: Client; userId: string }> {
   const owner = await signUpTestUser();
   const api = authedApi(owner.cookie);
-  await api.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(api, { key: 'MKT', name: 'Marketing' });
   return { api, userId: owner.userId };
 }
 
@@ -114,7 +114,7 @@ describe('documents', () => {
         .status,
     ).toBe(400);
 
-    await api.projects.post({ key: 'OPS', name: 'Operations' });
+    await createProject(api, { key: 'OPS', name: 'Operations' });
     const other = (await documents(api, 'OPS').post({ title: 'Other' })).data!;
     expect((await documents(api).post({ title: 'Invalid', parentId: other.id })).status).toBe(400);
     expect(
@@ -435,6 +435,74 @@ describe('documents', () => {
     );
   });
 
+  it('closes the routes of Docs while the section is off', async () => {
+    const owner = await setupOwnerProject();
+    const project = owner.api.projects({ projectKey: 'MKT' });
+    const view = await project.get();
+    const issueId = (
+      await project.issues.post({ columnId: view.data!.columns[0]!.id, title: 'Task' })
+    ).data!.id;
+    const initiativeId = (await project.initiatives.post({ title: 'Launch' })).data!.id;
+    const page = (await documents(owner.api).post({ title: 'Guide' })).data!;
+    const doc = documents(owner.api)({ documentId: page.id });
+
+    await project.settings.patch({ features: { documents: false } });
+    const statuses = [
+      (await documents(owner.api).get()).status,
+      (await documents(owner.api).post({ title: 'New' })).status,
+      (await doc.get()).status,
+      (await doc.comments.get()).status,
+      (await doc.assets.get()).status,
+      (await doc.assets.import.post({ filename: 'x.txt', contentBase64: 'aGk=' })).status,
+      (await doc.issues.get()).status,
+      (await doc.initiatives.get()).status,
+      (await doc.initiatives.post({ initiativeId })).status,
+      (await documents(owner.api)['for-issue']({ issueId }).get()).status,
+      (await documents(owner.api)['for-initiative']({ initiativeId }).get()).status,
+    ];
+    expect(statuses).toEqual(statuses.map(() => 403));
+
+    await project.settings.patch({ features: { documents: true } });
+    expect((await doc.get()).status).toBe(200);
+  });
+
+  it('lists the initiatives of a page for whoever reads both', async () => {
+    const owner = await setupOwnerProject();
+    const strategy = (
+      await owner.api.projects({ projectKey: 'MKT' }).initiatives.post({ title: 'Q3 Launch' })
+    ).data!;
+    const page = (await documents(owner.api).post({ title: 'Release guide' })).data!;
+    const secret = (await documents(owner.api).post({ title: 'Notes', isPrivate: true })).data!;
+    await documents(owner.api)({ documentId: page.id }).initiatives.post({
+      initiativeId: strategy.id,
+    });
+
+    const list = await documents(owner.api)({ documentId: page.id }).initiatives.get();
+    expect(list.status).toBe(200);
+    expect(list.data).toMatchObject([{ initiativeId: strategy.id, title: 'Q3 Launch' }]);
+
+    const readerRole = await createRole(owner.api, 'MKT', {
+      name: 'Reader',
+      permissions: { documents: { read: true }, initiatives: { read: true } },
+    });
+    const reader = await addMember(owner.api, readerRole.data!.id);
+    expect((await documents(reader.api)({ documentId: page.id }).initiatives.get()).status).toBe(
+      200,
+    );
+    expect((await documents(reader.api)({ documentId: secret.id }).initiatives.get()).status).toBe(
+      404,
+    );
+
+    const docsRole = await createRole(owner.api, 'MKT', {
+      name: 'Docs only',
+      permissions: { documents: { read: true } },
+    });
+    const docsOnly = await addMember(owner.api, docsRole.data!.id);
+    expect((await documents(docsOnly.api)({ documentId: page.id }).initiatives.get()).status).toBe(
+      403,
+    );
+  });
+
   it('links visible Docs and initiatives, and hides a private page from a reader', async () => {
     const owner = await setupOwnerProject();
     const strategy = (
@@ -559,7 +627,7 @@ describe('documents', () => {
     expect((await documents(outsider).get({ query: {} })).status).toBe(403);
     expect((await documents(outsider)({ documentId: document.id }).get()).status).toBe(403);
 
-    await owner.api.projects.post({ key: 'OPS', name: 'Operations' });
+    await createProject(owner.api, { key: 'OPS', name: 'Operations' });
     expect((await documents(owner.api, 'OPS')({ documentId: document.id }).get()).status).toBe(404);
   });
 

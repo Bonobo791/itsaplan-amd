@@ -13,9 +13,11 @@ import {
   gitManagedRepository,
   scimGroupMapping,
   projectAction,
+  agentFieldTrigger,
+  customField,
   type DbExecutor,
 } from '@repo/db';
-import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { HttpError, pgErrorCode } from '#shared/lib';
 import { teamAccess, workspaceRoleGrant } from '#shared/workspace-roles';
 import { getTeamLimits } from '#shared/limits';
@@ -63,6 +65,8 @@ async function checkTransfer(
     .select({ id: aiAgent.id })
     .from(aiAgent)
     .where(eq(aiAgent.userId, userId));
+  // Backstop: a plain agent is refused by the route guards first. This still catches an
+  // agent whose standing was raised some other way.
   if (agent) throw new HttpError(403, 'Agents cannot transfer projects');
   const [current] = await executor.select().from(project).where(eq(project.id, projectId));
   if (!current) throw new HttpError(404, 'Project not found');
@@ -128,6 +132,18 @@ async function checkTransfer(
     .from(agentRun)
     .where(and(eq(agentRun.projectId, projectId), eq(agentRun.status, 'pending')));
   if (runs.length) block('pending_runs', 'Finish or cancel pending project agent runs first');
+  // Detaching an agent leaves its triggers behind, and they name this project's fields.
+  const fieldTriggers = await executor
+    .select({ agentId: agentFieldTrigger.agentId })
+    .from(agentFieldTrigger)
+    .innerJoin(customField, eq(customField.id, agentFieldTrigger.fieldId))
+    .where(eq(customField.projectId, projectId))
+    .limit(1);
+  if (fieldTriggers.length)
+    block(
+      'agent_field_triggers',
+      'Remove agent triggers on the custom fields of this project first',
+    );
   const repositories = await executor
     .select({ id: gitManagedRepository.id })
     .from(gitManagedRepository)
@@ -147,13 +163,25 @@ async function checkTransfer(
       'Remove saved actions before transferring; their arbitrary JSON may reference team resources',
     );
   const roles = await executor.select().from(teamRole).where(eq(teamRole.teamId, source.id));
-  if (members.some((m) => m.roleId !== null && !roles.some((r) => r.id === m.roleId)))
+  // System roles (team_id NULL) belong to no team, so a member keeps one through the transfer.
+  const systemRoles = await executor
+    .select({ id: teamRole.id, isDefault: teamRole.isDefault })
+    .from(teamRole)
+    .where(isNull(teamRole.teamId));
+  const systemRoleIds = new Set(systemRoles.map((r) => r.id));
+  const isForeignRole = (roleId: number | null) =>
+    roleId !== null && !roles.some((r) => r.id === roleId) && !systemRoleIds.has(roleId);
+  if (members.some((m) => isForeignRole(m.roleId)))
     block('foreign_roles', 'Resolve member roles that do not belong to the source team first');
   const requiredRoles = roles.flatMap((role) => {
     const count = members.filter((m) => m.role === 'member' && m.roleId === role.id).length;
     return count ? [{ sourceRoleId: role.id, name: role.name, memberCount: count }] : [];
   });
-  const targetRoles = await executor.select().from(teamRole).where(eq(teamRole.teamId, target.id));
+  // A mapping may name a destination role or a system role, which list_role_options offers too.
+  const targetRoles = await executor
+    .select()
+    .from(teamRole)
+    .where(or(eq(teamRole.teamId, target.id), isNull(teamRole.teamId)));
   const { blockedFeatures } = await getTeamLimits(target.id, executor);
   const preview: ProjectTransferPreview = {
     projectId,
@@ -164,7 +192,8 @@ async function checkTransfer(
     canTransfer: blockers.length === 0,
     blockers,
     requiredRoles,
-    targetDefaultRoleId: targetRoles.find((r) => r.isDefault)?.id ?? null,
+    // Only system roles can be default (team_role_default_system_check), so the default is the system one.
+    targetDefaultRoleId: systemRoles.find((r) => r.isDefault)?.id ?? null,
     targetAvailableFeatures: PROJECT_FEATURES.filter((f) => !blockedFeatures.includes(f)),
     notificationProvidersChange: source.id !== target.id,
   };
@@ -177,6 +206,12 @@ export async function previewProjectTransfer(
   userId: string,
   mcpOnly: boolean,
 ): Promise<ProjectTransferPreview> {
+  // A preview onto the project's own team reports no blockers and would look transferable.
+  const [row] = await db
+    .select({ teamId: project.teamId })
+    .from(project)
+    .where(eq(project.id, projectId));
+  if (row?.teamId === targetTeamId) throw new HttpError(400, 'Choose a different destination team');
   return (await checkTransfer(db, projectId, targetTeamId, userId, mcpOnly)).preview;
 }
 
@@ -209,6 +244,8 @@ export async function transferProject(
         throw new HttpError(403, 'MCP must be enabled on both teams');
       if (current.teamId !== input.sourceTeamId && current.teamId !== input.targetTeamId)
         throw new HttpError(409, 'The project has moved to another team');
+      if (input.sourceTeamId === input.targetTeamId)
+        throw new HttpError(400, 'Choose a different destination team');
       const state = await checkTransfer(tx, current.id, input.targetTeamId, userId, mcpOnly);
       if (current.teamId === input.targetTeamId) return { current, target: state.target };
       const qualified = projectRef(original, current.key);
@@ -231,7 +268,10 @@ export async function transferProject(
           mapping.targetRoleId !== null &&
           !state.targetRoles.some((r) => r.id === mapping.targetRoleId)
         )
-          throw new HttpError(400, 'Mapped roles must belong to the destination team');
+          throw new HttpError(
+            400,
+            'Mapped roles must belong to the destination team or be system roles',
+          );
         mappings.set(
           mapping.sourceRoleId,
           mapping.targetRoleId ?? state.preview.targetDefaultRoleId,
@@ -282,6 +322,7 @@ export async function transferProject(
       teamName: moved.target.name,
       teamSlug: moved.target.slug,
       teamMcpEnabled: moved.target.mcpEnabled,
+      workspaceId: moved.target.workspaceId,
     });
   } catch (error) {
     if (['23505', '23503', '40001', '40P01', '55P03'].includes(pgErrorCode(error) ?? ''))

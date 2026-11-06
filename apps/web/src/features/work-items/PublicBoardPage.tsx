@@ -3,11 +3,12 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
-import { getSharedView } from '@/lib/api/endpoints/share';
+import { getSharedView, getSharedViewIssue } from '@/lib/api/endpoints/share';
+import { titlePath, useDocumentTitle } from '@/hooks/useDocumentTitle';
 import PublicShareFrame from '@/components/common/page/PublicShareFrame';
 import ListSkeleton from '@/components/common/skeleton/ListSkeleton';
 import ReadOnlyBoard from './components/public/ReadOnlyBoard';
-import PublicIssueOverlay from './components/public/PublicIssueOverlay';
+import PublicIssueOverlay from '@/features/issue/components/public/PublicIssueOverlay';
 
 // The public read-only page for a shared saved view (/share/view/:token). Fetches
 // the board bundle by token and renders it with no session; clicking an issue opens
@@ -20,6 +21,8 @@ export default function PublicBoardPage({ token }: { token: string }) {
     queryFn: () => getSharedView(token),
     retry: false,
   });
+  const shared = query.isError ? undefined : query.data;
+  useDocumentTitle(titlePath(shared?.project.project.name, shared?.view.name));
 
   if (query.isLoading) {
     return (
@@ -45,7 +48,8 @@ export default function PublicBoardPage({ token }: { token: string }) {
     <PublicShareFrame>
       <ReadOnlyBoard bundle={query.data} onOpenIssue={setOpenIssueId} />
       <PublicIssueOverlay
-        token={token}
+        queryKey={['share', 'view', token, 'issue']}
+        load={(issueId) => getSharedViewIssue(token, issueId)}
         issueId={openIssueId}
         extended={query.data.view.extended}
         onOpenIssue={setOpenIssueId}

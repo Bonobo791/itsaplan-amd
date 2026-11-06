@@ -36,16 +36,19 @@ export default function DocumentEditor({
   projectName,
   document,
   ancestors,
+  documents,
   authorName,
   authorNames,
   canEdit,
+  canShare,
   canReadWorkItems,
   canLinkWorkItems,
   isProjectOwner,
   canCreate,
   canDelete,
+  defaultCommentsOpen = false,
   onBack,
-  onCreateChild,
+  onCreate,
   onDuplicate,
   onDelete,
   onReload,
@@ -54,16 +57,20 @@ export default function DocumentEditor({
   projectName: string;
   document: ProjectDocument;
   ancestors: ProjectDocumentSummary[];
+  documents: ProjectDocumentSummary[];
   authorName: string | null;
   authorNames: Record<string, string>;
   canEdit: boolean;
+  canShare: boolean;
   canReadWorkItems: boolean;
   canLinkWorkItems: boolean;
   isProjectOwner: boolean;
   canCreate: boolean;
   canDelete: boolean;
-  onBack: () => void;
-  onCreateChild: () => void;
+  defaultCommentsOpen?: boolean;
+  // Left out where the page around the document has its own way back.
+  onBack?: () => void;
+  onCreate: (parentId: number | null, isPrivate: boolean) => void;
   onDuplicate: (title: string, version: number) => Promise<void>;
   onDelete: (version: number) => Promise<void>;
   onReload: () => Promise<ProjectDocument | null>;
@@ -76,7 +83,7 @@ export default function DocumentEditor({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(defaultCommentsOpen);
   const [commentSelection, setCommentSelection] = useState<DocumentSelection | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const documentAction = useDocumentActionGate();
@@ -136,6 +143,7 @@ export default function DocumentEditor({
       setInspectorOpen(false);
     },
     editable ? collaboration.version : document.version,
+    collaboration.ready,
   );
   const providerActionPending =
     updateDocument.isPending ||
@@ -145,10 +153,13 @@ export default function DocumentEditor({
     restoreDocument.isPending ||
     setDocumentFavorite.isPending;
   const actionPending = documentAction.pending || providerActionPending;
+  // A session that failed to open holds no local steps, so an action goes with the
+  // page's own version instead of waiting for a session that may never open.
+  const usesSession = editable && !collaboration.openFailed;
   const busy =
     actionPending ||
     saveState === 'saving' ||
-    (editable && (!collaboration.ready || collaboration.status === 'saving'));
+    (usesSession && (!collaboration.ready || collaboration.status === 'saving'));
 
   useEffect(() => {
     const element = titleRef.current;
@@ -164,8 +175,8 @@ export default function DocumentEditor({
 
   const prepareVersion = async () => {
     if (providerActionPending || saveState === 'conflict' || saveState === 'error') return null;
-    const synchronized = editable ? await collaboration.flush() : null;
-    if (editable && !synchronized) return null;
+    const synchronized = usesSession ? await collaboration.flush() : null;
+    if (usesSession && !synchronized) return null;
     const updatedDraft = await save();
     if (dirty && !updatedDraft) return null;
     return updatedDraft?.version ?? synchronized?.version ?? version;
@@ -202,6 +213,7 @@ export default function DocumentEditor({
           projectName={projectName}
           document={document}
           ancestors={ancestors}
+          documents={documents}
           title={title}
           content={() => editor?.storage.markdown.getMarkdown() ?? content}
           richHtml={() => editor?.getHTML() ?? ''}
@@ -219,6 +231,7 @@ export default function DocumentEditor({
           canManage={canManage}
           canManageLifecycle={canManageLifecycle}
           canDelete={canManageLifecycle}
+          canShare={canShare && !document.isPrivate && document.archivedAt === null}
           busy={busy}
           onBack={onBack}
           onRetrySave={() => {
@@ -234,7 +247,7 @@ export default function DocumentEditor({
             );
           }}
           onStickyToolbarChange={setStickyToolbar}
-          onCreateChild={onCreateChild}
+          onCreate={onCreate}
           onDuplicate={() => {
             void documentAction.run(async () => {
               const baseVersion = await prepareVersion();
@@ -268,7 +281,7 @@ export default function DocumentEditor({
             void runVersioned((baseVersion) =>
               archiveDocument.mutateAsync({ documentId: document.id, version: baseVersion }),
             ).then((changed) => {
-              if (changed) onBack();
+              if (changed) onBack?.();
             });
           }}
           onRestore={() => {

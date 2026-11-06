@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { db, project } from '@repo/db';
 import { eq, sql } from 'drizzle-orm';
-import { authedApi } from '#tests/helpers/app';
+import { authedApi, createProject, ownWorkspaceId } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 
@@ -24,8 +24,14 @@ describe('requests during project transfers', () => {
   it('rejects an action validated before a transfer but queued behind it', async () => {
     const owner = await signUpTestUser();
     const api = authedApi(owner.cookie);
-    const source = (await api.projects.post({ key: 'MOVE', name: 'Project' })).data!;
-    const target = (await api.teams.post({ name: 'Destination', slug: 'destination' })).data!;
+    const source = (await createProject(api, { key: 'MOVE', name: 'Project' })).data!;
+    const target = (
+      await api.teams.post({
+        name: 'Destination',
+        slug: 'destination',
+        workspaceId: await ownWorkspaceId(api),
+      })
+    ).data!;
     let unlock!: () => void;
     let signalLocked!: () => void;
     const release = new Promise<void>((resolve) => {
@@ -82,8 +88,14 @@ describe('requests during project transfers', () => {
     async (route) => {
       const owner = await signUpTestUser();
       const api = authedApi(owner.cookie);
-      const source = (await api.projects.post({ key: 'MOVE', name: 'Project' })).data!;
-      const target = (await api.teams.post({ name: 'Destination', slug: 'destination' })).data!;
+      const source = (await createProject(api, { key: 'MOVE', name: 'Project' })).data!;
+      const target = (
+        await api.teams.post({
+          name: 'Destination',
+          slug: 'destination',
+          workspaceId: await ownWorkspaceId(api),
+        })
+      ).data!;
       let unlock!: () => void;
       let signalLocked!: () => void;
       const release = new Promise<void>((resolve) => {

@@ -14,7 +14,7 @@ import {
   customField,
   integrationCredential,
 } from '@repo/db';
-import { and, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm';
 import { auth } from '@repo/auth';
 import { iso, HttpError, rethrowDuplicate } from '#shared/lib';
 import { getCredentialById } from '../integrations/service';
@@ -24,9 +24,12 @@ import { normalizeToolKeys, ALWAYS_ON_ACTIONS } from './runtime/tools/catalog';
 import { deleteThreadsWhere } from './runtime/memory';
 import { listAgentMemberFieldIds } from '#modules/custom-fields/service';
 import { runsTeam, type TeamStanding } from '#modules/teams/service';
+import type { TeamMembership } from '#shared/access';
 import { projectRefSql } from '#modules/teams/ref';
 import { getDefaultRoleId } from '#modules/roles/service';
 import { deleteAccount } from '#shared/account-deletion';
+import { assertPublicHttpUrl } from '#shared/net';
+import { ensureInvocationSecret } from '../invocation/secret';
 
 // Data access for AI agents. Each agent is backed by a hidden bot user
 // (ai_agent.user_id -> user.id): that user is what a work item is assigned to,
@@ -95,12 +98,15 @@ export interface AiAgentRow {
   temperature: number | null;
   reasoningEffort: ReasoningEffort | null;
   maxSteps: number | null;
+  runTimeoutSec: number | null;
   // Conversation memory: recall the last memoryLastMessages messages of a thread.
   memoryEnabled: boolean;
   memoryLastMessages: number | null;
   // Run triggers.
   triggerOnMention: boolean;
   triggerOnAssign: boolean;
+  // Whether the agent may be chatted with; a mention, a delegation and a schedule ignore it.
+  chatEnabled: boolean;
   // The member custom fields the agent also reacts to: being set into one of them
   // starts a run the way being made an issue's delegate does. Each field carries its
   // own delay, so a field can start at once while another leaves time to edit.
@@ -114,6 +120,9 @@ export interface AiAgentRow {
   // When a runner last polled for this agent, which is what presence is derived
   // from. Null until a runner connects.
   lastSeenAt: string | null;
+  // Where an external agent's work is sent instead of being claimed by a runner, or
+  // null when a runner drains it.
+  invocationUrl: string | null;
   createdAt: string;
   // The agent's current API key, for display only — the secret is never returned
   // after creation. start is the key's leading characters kept for identification.
@@ -144,15 +153,18 @@ function mapAgent(row: {
   temperature: number | null;
   reasoningEffort: string | null;
   maxSteps: number | null;
+  runTimeoutSec: number | null;
   memoryEnabled: boolean;
   memoryLastMessages: number | null;
   triggerOnMention: boolean;
   triggerOnAssign: boolean;
+  chatEnabled: boolean;
   fieldTriggers: FieldTriggerRead[];
   delegationDelaySec: number;
   ownerUserId: string | null;
   runnerScope: string;
   lastSeenAt: Date | null;
+  invocationUrl: string | null;
   createdAt: Date;
   apiKeyStart: string | null;
   modelProvider: string | null;
@@ -175,15 +187,18 @@ function mapAgent(row: {
     temperature: row.temperature,
     reasoningEffort: row.reasoningEffort as ReasoningEffort | null,
     maxSteps: row.maxSteps,
+    runTimeoutSec: row.runTimeoutSec,
     memoryEnabled: row.memoryEnabled,
     memoryLastMessages: row.memoryLastMessages,
     triggerOnMention: row.triggerOnMention,
     triggerOnAssign: row.triggerOnAssign,
+    chatEnabled: row.chatEnabled,
     fieldTriggers: row.fieldTriggers,
     delegationDelaySec: row.delegationDelaySec,
     ownerUserId: row.ownerUserId,
     runnerScope: row.runnerScope as RunnerScope,
     lastSeenAt: row.lastSeenAt ? iso(row.lastSeenAt) : null,
+    invocationUrl: row.invocationUrl,
     createdAt: iso(row.createdAt),
     apiKeyStart: row.apiKeyStart,
     modelProvider: row.modelProvider,
@@ -212,10 +227,12 @@ const agentColumns = {
   temperature: aiAgent.temperature,
   reasoningEffort: aiAgent.reasoningEffort,
   maxSteps: aiAgent.maxSteps,
+  runTimeoutSec: aiAgent.runTimeoutSec,
   memoryEnabled: aiAgent.memoryEnabled,
   memoryLastMessages: aiAgent.memoryLastMessages,
   triggerOnMention: aiAgent.triggerOnMention,
   triggerOnAssign: aiAgent.triggerOnAssign,
+  chatEnabled: aiAgent.chatEnabled,
   fieldTriggers: sql<
     FieldTriggerRead[]
   >`(select coalesce(json_agg(json_build_object('fieldId', ${agentFieldTrigger.fieldId}, 'name', ${customField.name}, 'delaySec', ${agentFieldTrigger.delaySec}) order by ${customField.name}), '[]'::json) from ${agentFieldTrigger} join ${customField} on ${customField.id} = ${agentFieldTrigger.fieldId} where ${agentFieldTrigger.agentId} = ${aiAgent.id})`,
@@ -223,6 +240,7 @@ const agentColumns = {
   ownerUserId: aiAgent.ownerUserId,
   runnerScope: aiAgent.runnerScope,
   lastSeenAt: aiAgent.lastSeenAt,
+  invocationUrl: aiAgent.invocationUrl,
   createdAt: aiAgent.createdAt,
   apiKeyStart: apikey.start,
   modelProvider: integrationCredential.integrationKey,
@@ -275,11 +293,57 @@ export async function memberProjectIds(teamId: number, userId: string): Promise<
   return rows.map((row) => row.id);
 }
 
+// The agents, each with whether the caller may act on it as a whole, by the rule
+// assertFullAgentAccess applies, so a screen can hide what the caller would be refused.
+export async function withCanManage<T extends { projects: { id: number }[] }>(
+  membership: TeamMembership,
+  agents: T[],
+): Promise<(T & { canManage: boolean })[]> {
+  const runs = runsTeam(membership.role);
+  const mine = new Set(runs ? [] : await memberProjectIds(membership.teamId, membership.userId));
+  return agents.map((agent) => ({
+    ...agent,
+    canManage: runs || agent.projects.every((p) => mine.has(p.id)),
+  }));
+}
+
+// Regenerating the key, editing the agent, changing its tools or skills, deleting it, or
+// reading its invocation secret acts on the agent in every project it works in — the key
+// authenticates as the bot in all of them, and the secret signs the work it runs there.
+// The visibility check only needs one shared project, so a caller who shares just one
+// must not reach the others: these require running the team or being a member of every
+// project the agent is in.
+export async function assertFullAgentAccess(
+  membership: TeamMembership,
+  agentId: number,
+): Promise<void> {
+  if (runsTeam(membership.role)) return;
+  const agent = await getAgentById(agentId, membership.teamId);
+  if (!agent) throw new HttpError(404, 'Agent not found');
+  const [{ canManage }] = await withCanManage(membership, [agent]);
+  if (!canManage) {
+    throw new HttpError(
+      403,
+      'Only a team owner or manager, or a member of every project the agent works in, can do this',
+    );
+  }
+}
+
 // Whether the agent works in a project the user is a member of, as a condition on a
 // query over ai_agent. Both sides are project_member rows: the agent's bot user and
 // the user themselves.
 function sharesProjectWith(userId: string) {
   return sql`exists (select 1 from ${projectMember} pm join ${projectMember} mine on mine.project_id = pm.project_id and mine.user_id = ${userId} where pm.user_id = ${aiAgent.userId})`;
+}
+
+export async function listProjectAgents(projectId: number) {
+  const rows = await db
+    .select({ id: aiAgent.id, name: user.name, kind: aiAgent.kind, model: aiAgent.model })
+    .from(aiAgent)
+    .innerJoin(user, eq(user.id, aiAgent.userId))
+    .where(inProject(projectId))
+    .orderBy(asc(user.name));
+  return rows.map((row) => ({ ...row, kind: row.kind as AgentKind }));
 }
 
 // The agents of the team, or only the ones working in one of its projects when
@@ -338,6 +402,14 @@ export function isTriggerableBy(
 ): boolean {
   if (agent.kind === 'internal' || agent.runnerScope !== 'owner' || !agent.ownerUserId) return true;
   return agent.ownerUserId === actorUserId;
+}
+
+// Asked for a chat message only: a queued run (a mention, a delegation, a schedule)
+// ignores chatEnabled.
+export function assertChatEnabled(agent: { chatEnabled: boolean }): void {
+  if (!agent.chatEnabled) {
+    throw new HttpError(403, 'This agent is not available in chat', 'AGENT_CHAT_DISABLED');
+  }
 }
 
 const triggerScopeColumns = {
@@ -525,6 +597,7 @@ export interface NewAgentInput {
   temperature?: number | null;
   reasoningEffort?: ReasoningEffort | null;
   maxSteps?: number | null;
+  runTimeoutSec?: number | null;
   memoryEnabled?: boolean;
   memoryLastMessages?: number | null;
   // Run triggers. Assign is off by default, and so is mention for an external agent:
@@ -532,6 +605,8 @@ export interface NewAgentInput {
   // for its API key alone must not collect runs no one drains.
   triggerOnMention?: boolean;
   triggerOnAssign?: boolean;
+  // Whether the agent may be chatted with. Defaults on.
+  chatEnabled?: boolean;
   // The member custom fields that start a run when the agent is set into one.
   fieldTriggers?: FieldTrigger[];
   delegationDelaySec?: number;
@@ -540,6 +615,8 @@ export interface NewAgentInput {
   projectIds?: number[];
   // External-agent runner scope (default: any member's runs).
   runnerScope?: RunnerScope;
+  // Where an external agent's work is sent; omitted or null for one a runner drains.
+  invocationUrl?: string | null;
   // The member creating the agent, who owns its runner.
   ownerUserId?: string | null;
 }
@@ -596,12 +673,14 @@ export async function createAgent(
   const userId = crypto.randomUUID();
   const email = `${userId}@agents.local`;
   const isInternal = input.kind === 'internal';
+  const invocationUrl = isInternal ? null : (input.invocationUrl ?? null);
   await assertUsernameFree(teamId, input.username);
   if (isInternal) await assertModelCredential(teamId, input.modelCredentialId);
+  if (invocationUrl) await assertPublicHttpUrl(invocationUrl);
   const projectIds = await resolveTeamProjectIds(teamId, input.projectIds ?? []);
-  // An agent joins a project the way a person accepting an invite does: on the team's
-  // default role, changed per project from the project's member list afterwards.
-  const roleId = await getDefaultRoleId(teamId);
+  // An agent joins a project the way a person accepting an invite does: on the default
+  // role, changed per project from the project's member list afterwards.
+  const roleId = await getDefaultRoleId();
 
   const agentId = await db.transaction(async (tx) => {
     await tx
@@ -622,13 +701,16 @@ export async function createAgent(
           temperature: isInternal ? (input.temperature ?? null) : null,
           reasoningEffort: isInternal ? (input.reasoningEffort ?? null) : null,
           maxSteps: isInternal ? (input.maxSteps ?? null) : null,
+          runTimeoutSec: isInternal ? (input.runTimeoutSec ?? null) : null,
           memoryEnabled: isInternal ? (input.memoryEnabled ?? false) : false,
           memoryLastMessages: isInternal ? (input.memoryLastMessages ?? null) : null,
           triggerOnMention: input.triggerOnMention ?? isInternal,
           triggerOnAssign: input.triggerOnAssign ?? false,
+          chatEnabled: input.chatEnabled ?? true,
           delegationDelaySec: input.delegationDelaySec,
           ownerUserId: input.ownerUserId ?? null,
           runnerScope: input.runnerScope ?? 'team',
+          invocationUrl,
         })
         .returning({ id: aiAgent.id });
       // The agent belongs to the team's member list like a person does, on a standing
@@ -649,6 +731,7 @@ export async function createAgent(
   if (input.fieldTriggers?.length) {
     await setFieldTriggers(agentId, projectIds, input.fieldTriggers);
   }
+  if (invocationUrl) await ensureInvocationSecret(agentId);
 
   // Issued outside the transaction: better-auth writes the key through its own
   // connection, so it cannot join this one.
@@ -664,7 +747,7 @@ export async function createAgent(
 // works in keeps the role that membership carries.
 async function setAgentProjects(agent: AiAgentRow, projectIds: number[]): Promise<number[]> {
   const wanted = await resolveTeamProjectIds(agent.teamId, projectIds);
-  const roleId = await getDefaultRoleId(agent.teamId);
+  const roleId = await getDefaultRoleId();
   await db.transaction(async (tx) => {
     await tx
       .delete(projectMember)
@@ -780,13 +863,16 @@ export interface AgentPatch {
   temperature?: number | null;
   reasoningEffort?: ReasoningEffort | null;
   maxSteps?: number | null;
+  runTimeoutSec?: number | null;
   memoryEnabled?: boolean;
   memoryLastMessages?: number | null;
   triggerOnMention?: boolean;
   triggerOnAssign?: boolean;
+  chatEnabled?: boolean;
   fieldTriggers?: FieldTrigger[];
   delegationDelaySec?: number;
   runnerScope?: RunnerScope;
+  invocationUrl?: string | null;
 }
 
 export async function updateAgent(
@@ -799,6 +885,9 @@ export async function updateAgent(
   const agent = await getAgentById(id, teamId);
   if (!agent) return null;
   await assertModelCredential(teamId, patch.modelCredentialId);
+  // Only an external agent is sent its work; an internal one runs here.
+  const invocationUrl = agent.kind === 'external' ? patch.invocationUrl : undefined;
+  if (invocationUrl) await assertPublicHttpUrl(invocationUrl);
 
   // The display name lives on the bot user.
   if (patch.name !== undefined) {
@@ -817,10 +906,12 @@ export async function updateAgent(
   if (patch.temperature !== undefined) set.temperature = patch.temperature;
   if (patch.reasoningEffort !== undefined) set.reasoningEffort = patch.reasoningEffort;
   if (patch.maxSteps !== undefined) set.maxSteps = patch.maxSteps;
+  if (patch.runTimeoutSec !== undefined) set.runTimeoutSec = patch.runTimeoutSec;
   if (patch.memoryEnabled !== undefined) set.memoryEnabled = patch.memoryEnabled;
   if (patch.memoryLastMessages !== undefined) set.memoryLastMessages = patch.memoryLastMessages;
   if (patch.triggerOnMention !== undefined) set.triggerOnMention = patch.triggerOnMention;
   if (patch.triggerOnAssign !== undefined) set.triggerOnAssign = patch.triggerOnAssign;
+  if (patch.chatEnabled !== undefined) set.chatEnabled = patch.chatEnabled;
   if (patch.delegationDelaySec !== undefined) set.delegationDelaySec = patch.delegationDelaySec;
   // The scope and its owner are one setting: 'owner' means the runs of the member who
   // chose it, so switching to it hands the agent to them.
@@ -828,6 +919,7 @@ export async function updateAgent(
     set.runnerScope = patch.runnerScope;
     if (patch.runnerScope === 'owner') set.ownerUserId = actorUserId;
   }
+  if (invocationUrl !== undefined) set.invocationUrl = invocationUrl;
   if (Object.keys(set).length > 0) {
     try {
       await db
@@ -848,6 +940,7 @@ export async function updateAgent(
   if (patch.fieldTriggers !== undefined) {
     await setFieldTriggers(id, projectIds, patch.fieldTriggers);
   }
+  if (invocationUrl) await ensureInvocationSecret(id);
 
   return getAgentById(id, teamId);
 }

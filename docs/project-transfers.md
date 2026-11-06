@@ -30,8 +30,8 @@ Call `list_role_options` for the destination team to choose its roles. Every hum
 project member must already belong to that team; the transfer does not invite
 people or change their team standing. Project owners remain owners. Map each used
 source member role to a destination role, or pass `null` to choose the destination's
-default. Members without an assigned role also receive that default. If the team
-has no default role, `null` retains the standard member permissions.
+default. Members without an assigned role also receive that default. The default is
+the system default role, which every team shares.
 
 Call `transfer_project` with the IDs returned by the preview:
 
@@ -47,15 +47,17 @@ Call `transfer_project` with the IDs returned by the preview:
 
 Omit `roleMappings` when the preview reports no required roles. A successful call
 returns the project with its new `teamId` and `ref`. Use that reference for later
-calls. The same transfer request can be retried using the original reference and
-IDs, including if the source team slug has changed or another project has since
-reused the old key. A project moved
-to a different destination returns a conflict instead.
+calls. While the project is still at the destination, the same transfer request can
+be retried using the original reference and IDs, including if the source team slug
+has changed or another project has since reused the old key. Once the project has
+moved on, a replayed request is a new transfer and needs its own authority. A project
+moved to a different destination returns a conflict instead.
 
 ## Blockers and concurrent changes
 
 Restore archived projects and resolve duplicate destination keys before moving.
-The preview also blocks missing destination memberships, foreign member roles,
+The preview also blocks missing destination memberships, foreign member roles
+(system roles are not foreign: members keep them through the transfer),
 SCIM mappings or memberships, pending project invitations, attached agents, agent
 schedules (including paused ones), pending runs, managed repositories, and saved
 actions. Detach or resolve those dependencies first. Team credentials stay with
@@ -74,5 +76,6 @@ stored objects; a deletion queued behind a transfer returns a conflict.
 A conflict means the caller should preview again.
 
 The REST endpoints are `POST /projects/:projectKey/transfer/preview` and
-`POST /projects/:projectKey/transfer`, with the same bodies except `projectKey`
-is the path parameter. This feature adds API and MCP tools; it adds no web UI.
+`POST /projects/:projectKey/transfer`. The preview body is `{ targetTeamId }`; the transfer
+body adds `projectId`, `sourceTeamId` and optional `roleMappings`. `projectKey` is the path
+parameter. This feature adds API and MCP tools; it adds no web UI.

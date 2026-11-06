@@ -1,7 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { auth } from '@repo/auth';
-import { app, authedApi } from '#tests/helpers/app';
+import { app, authedApi, createProject, ownWorkspaceId } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { buildMcpServer } from '#mcp/server';
@@ -47,8 +47,14 @@ describe('project transfers through MCP', () => {
   it('lists and calls the preview and transfer tools, including retrying the old ref', async () => {
     const owner = await signUpTestUser();
     const api = authedApi(owner.cookie);
-    const source = (await api.projects.post({ key: 'MOVE', name: 'Project' })).data!;
-    const target = (await api.teams.post({ name: 'Destination', slug: 'destination' })).data!;
+    const source = (await createProject(api, { key: 'MOVE', name: 'Project' })).data!;
+    const target = (
+      await api.teams.post({
+        name: 'Destination',
+        slug: 'destination',
+        workspaceId: await ownWorkspaceId(api),
+      })
+    ).data!;
     const client = await connect(owner.userId);
     expect((await client.listTools()).tools.map((t) => t.name)).toEqual(
       expect.arrayContaining(['preview_project_transfer', 'transfer_project']),

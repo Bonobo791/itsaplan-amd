@@ -23,7 +23,8 @@ returns.
 - `apps/api/src/modules/import-export/` — create/test-connection/plane-preview/export/status/
   pause/resume/cancel routes, and linear-test-connection/linear-preview.
 - The Linear source (`linear-adapter.ts`, `linear-mapping.ts`, the api's `linear.ts`, the
-  Linear tab) has its own notes: [linear-import.md](linear-import.md).
+  Linear tab) has its own notes: [linear-import.md](linear-import.md). So does the Trello
+  source: [trello-import.md](trello-import.md).
 - `apps/web/src/features/settings/components/import-export/` — the Settings page.
 
 ## Export: a JSON snapshot, not a live sync
@@ -130,6 +131,10 @@ attachment) are a distinct path, not covered by this — see "Inline images" in
   (`plane-adapter.ts`) has no entry for `start_before`/`start_after`/`finish_before`/
   `finish_after` — itsaplan's `issue_link.kind` has no scheduling-dependency concept, so
   these are filtered out, not a bug.
+- Create advances its local record cursor after the entire batch finishes, including labels,
+  comments and attachment discovery. A retry revisits every issue after that cursor and reuses
+  its existing job/source mapping, then finishes its child records without replacing local
+  issue fields. Completed batches are not fetched again.
 - **Re-running an import against the same source project reuses what a previous run already
   created, by name/content match, not by any record of which import created what.**
   `import_record` makes one job's own retries and resumes safe; across two separate jobs

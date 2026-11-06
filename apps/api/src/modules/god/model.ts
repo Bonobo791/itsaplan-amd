@@ -1,14 +1,28 @@
 import { t } from 'elysia';
 import { REGISTRATION_MODES } from '@repo/auth';
+import { LOCALES } from '@repo/mailer';
 import { pageQueryFields, pageResponse } from '#shared/pagination';
 import { PermissionMatrixSchema } from '#shared/permissions';
 import { USER_KINDS } from './service';
 
 const encryption = t.UnionEnum(['none', 'ssl', 'tls']);
+const smtpAuth = t.UnionEnum(['password', 'microsoft365']);
+
+const EMAIL_DOMAIN_PATTERN = '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9-]{2,63}$';
+
+// Lowercase domains, compared with the part of an address after the "@".
+export const EmailDomains = t.Array(t.String({ pattern: EMAIL_DOMAIN_PATTERN }), {
+  maxItems: 100,
+  uniqueItems: true,
+});
 
 export const userParams = t.Object({ userId: t.String() });
 
 export const projectParams = t.Object({ projectId: t.Numeric() });
+
+export const scimGroupParams = t.Object({ groupId: t.String() });
+
+export const roleParams = t.Object({ roleId: t.Numeric() });
 
 export const listUsersQuery = t.Object({
   search: t.Optional(t.String()),
@@ -38,6 +52,9 @@ export const AuthSettingsResponse = t.Object({
   emailPassword: t.Boolean(),
   trustProviderEmails: t.Boolean(),
   personalWorkspaces: t.Boolean(),
+  inviteTtlDays: t.Integer(),
+  inviteSearch: t.Boolean(),
+  allowedEmailDomains: t.Array(t.String()),
   // The settings that depend on outbound email cannot be turned on without a mail
   // provider, and the UI explains why.
   hasEmailProvider: t.Boolean(),
@@ -55,6 +72,10 @@ export const AuthSettingsBody = t.Object({
   emailPassword: t.Optional(t.Boolean()),
   trustProviderEmails: t.Optional(t.Boolean()),
   personalWorkspaces: t.Optional(t.Boolean()),
+  // The cap keeps createdAt plus the lifetime inside the range a Date can hold.
+  inviteTtlDays: t.Optional(t.Integer({ minimum: 0, maximum: 3650 })),
+  inviteSearch: t.Optional(t.Boolean()),
+  allowedEmailDomains: t.Optional(EmailDomains),
 });
 
 export const EmailSettingsResponse = t.Object({
@@ -66,6 +87,8 @@ export const EmailSettingsResponse = t.Object({
     username: t.String(),
     hasPassword: t.Boolean(),
     timeout: t.Nullable(t.Number()),
+    auth: smtpAuth,
+    oauth: t.Object({ tenantId: t.String(), clientId: t.String(), hasClientSecret: t.Boolean() }),
   }),
   resend: t.Object({ enabled: t.Boolean(), hasApiKey: t.Boolean() }),
   from: t.String(),
@@ -84,6 +107,14 @@ export const EmailSettingsBody = t.Object({
       username: t.String(),
       password: t.Optional(t.String()),
       timeout: t.Nullable(t.Integer({ minimum: 1 })),
+      auth: t.Optional(smtpAuth),
+      oauth: t.Optional(
+        t.Object({
+          tenantId: t.String({ maxLength: 128 }),
+          clientId: t.String({ maxLength: 128 }),
+          clientSecret: t.Optional(t.String({ maxLength: 1024 })),
+        }),
+      ),
     }),
   ),
   resend: t.Optional(t.Object({ enabled: t.Boolean(), apiKey: t.Optional(t.String()) })),
@@ -92,6 +123,55 @@ export const EmailSettingsBody = t.Object({
 });
 
 export const EmailTestResponse = t.Object({ recipient: t.String() });
+
+const EmailText = t.Object({
+  subject: t.String({ maxLength: 500 }),
+  body: t.String({ maxLength: 20_000 }),
+  button: t.String({ maxLength: 200 }),
+});
+
+const EmailLayout = t.Object({
+  html: t.String({ maxLength: 200_000 }),
+  css: t.String({ maxLength: 100_000 }),
+});
+
+const EmailTextByLocale = t.Record(t.String(), EmailText);
+
+export const EmailTemplatesBody = t.Object({
+  edits: t.Record(t.String(), EmailTextByLocale),
+  layout: t.Nullable(EmailLayout),
+});
+
+export const EmailDraftBody = t.Object({
+  key: t.String(),
+  locale: t.UnionEnum([...LOCALES]),
+  text: EmailText,
+  layout: EmailLayout,
+});
+
+export const EmailTemplatesResponse = t.Object({
+  templates: t.Array(
+    t.Object({
+      key: t.String(),
+      group: t.String(),
+      variables: t.Array(t.String()),
+      hasLink: t.Boolean(),
+      defaults: EmailTextByLocale,
+      edits: EmailTextByLocale,
+    }),
+  ),
+  layout: EmailLayout,
+  defaultLayout: EmailLayout,
+  placeholders: t.Array(t.Object({ name: t.String(), required: t.Boolean() })),
+  canSend: t.Boolean(),
+});
+
+export const EmailPreviewResponse = t.Object({
+  subject: t.String(),
+  text: t.String(),
+  html: t.String(),
+  from: t.Nullable(t.String()),
+});
 
 export const GoogleSettingsResponse = t.Object({
   enabled: t.Boolean(),
@@ -161,6 +241,8 @@ const InstanceUserResponse = t.Object({
   isAgent: t.Boolean(),
   providers: t.Array(t.String()),
   projectCount: t.Number(),
+  active: t.Boolean(),
+  activeLock: t.Nullable(t.UnionEnum(['owner', 'agent', 'scim'])),
   lastSeenAt: t.Nullable(t.String()),
   createdAt: t.String(),
 });

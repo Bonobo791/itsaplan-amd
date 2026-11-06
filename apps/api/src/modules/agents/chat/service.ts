@@ -1,11 +1,10 @@
 import { db, agentChatEvent, agentChatFavorite, agentChatMessage, agentChatThread } from '@repo/db';
 import { and, asc, desc, eq, gt, inArray, notExists, sql } from 'drizzle-orm';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { intEnv, iso } from '#shared/lib';
+import { intEnv, iso, likePattern } from '#shared/lib';
 import { deleteContextUsage, recordContextUsage, type ContextUsage } from '../chat-usage';
 import { deleteFavorite, FAVORITES_LIMIT } from '../chat-favorites';
 import {
-  likePattern,
   searchTerm,
   snippetOf,
   summarize,
@@ -17,7 +16,7 @@ import { attachmentPreamble, chartPreamble, projectsPreamble } from '../core/pro
 import { peoplePreamble, type Person } from '../core/prompt/run-context';
 import type { ChatMessagePage, ChatPart, ChatThreadPage } from '../model';
 import { newChatThreadId } from '../core/runtime/thread-ids';
-import { touchRunner, type RunnerAgent } from '../runner/service';
+import { assertRunnerDrained, touchRunner, type RunnerAgent } from '../runner/service';
 import type { AgUiEventBody, ChatMessageStatus } from './model';
 
 // Chat with an external agent. The answer is produced by a runner on the operator's
@@ -421,6 +420,7 @@ async function expireExhausted(agentId: number): Promise<void> {
 // when none turns up in time. Waiting instead of polling is what makes an answer start
 // the moment it is sent.
 export async function claimNextMessage(agent: RunnerAgent): Promise<ClaimedChat | null> {
+  assertRunnerDrained(agent);
   await touchRunner(agent.id);
   await expireExhausted(agent.id);
   const deadline = Date.now() + agentChatConfig.claimWaitMs();
@@ -430,6 +430,13 @@ export async function claimNextMessage(agent: RunnerAgent): Promise<ClaimedChat 
     if (Date.now() >= deadline) return null;
     await sleep(Math.min(agentChatConfig.claimPollMs(), Math.max(0, deadline - Date.now())));
   }
+}
+
+// The agent's next due answer without waiting for one, for an agent whose answers are
+// sent to its invocation URL rather than claimed.
+export async function takeNextMessage(agent: RunnerAgent): Promise<ClaimedChat | null> {
+  await expireExhausted(agent.id);
+  return claimMessage(agent);
 }
 
 // Takes the agent's next due answer, or null when it has none. Claiming clears whatever

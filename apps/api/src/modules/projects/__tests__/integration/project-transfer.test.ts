@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { apiKeyApi, authedApi } from '#tests/helpers/app';
+import { agentFieldTrigger, customField, db, teamRole } from '@repo/db';
+import { emptyPermissions } from '#shared/permissions';
+import { apiKeyApi, authedApi, createProject, ownWorkspaceId } from '#tests/helpers/app';
+import { createRole } from '#tests/helpers/roles';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { createAgent } from '#tests/helpers/agents';
@@ -9,8 +12,14 @@ import { setOwnedWorkspaceLimit } from '#shared/limits';
 async function setup() {
   const user = await signUpTestUser();
   const api = authedApi(user.cookie);
-  const source = (await api.projects.post({ key: 'MOVE', name: 'Project' })).data!;
-  const target = (await api.teams.post({ name: 'Destination', slug: 'destination' })).data!;
+  const source = (await createProject(api, { key: 'MOVE', name: 'Project' })).data!;
+  const target = (
+    await api.teams.post({
+      name: 'Destination',
+      slug: 'destination',
+      workspaceId: await ownWorkspaceId(api),
+    })
+  ).data!;
   return { user, api, source, target };
 }
 
@@ -70,7 +79,7 @@ describe('project transfers', () => {
     const { api, source, target } = await setup();
     const body = { targetTeamId: target.id, sourceTeamId: source.teamId, projectId: source.id };
     expect((await api.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(200);
-    const replacement = (await api.projects.post({ key: 'MOVE', name: 'Replacement' })).data!;
+    const replacement = (await createProject(api, { key: 'MOVE', name: 'Replacement' })).data!;
     const retry = await api.projects({ projectKey: source.ref }).transfer.post(body);
     expect(retry.status).toBe(200);
     expect(retry.data?.id).toBe(source.id);
@@ -120,13 +129,14 @@ describe('project transfers', () => {
       const { api, source, target } = await setup();
       const member = await signUpTestUser();
       const memberApi = authedApi(member.cookie);
-      const sourceRole = (await api.teams({ teamId: source.teamId }).roles.options.get()).data![0];
+      const sourceRole = (await createRole(api, source.key, { name: 'Analyst', permissions: {} }))
+        .data!;
       const invite = (
         await api
           .projects({ projectKey: source.ref })
           .invites.post({ email: member.email, role: 'member', roleId: sourceRole.id })
       ).data!;
-      await memberApi.invites({ token: invite.token }).accept.post();
+      expect((await memberApi.invites({ token: invite.token }).accept.post()).status).toBe(200);
       const preview = await api
         .projects({ projectKey: source.ref })
         .transfer.preview.post({ targetTeamId: target.id });
@@ -134,10 +144,16 @@ describe('project transfers', () => {
       const join = (
         await api.teams({ teamId: target.id }).invites.post({ email: member.email, role: 'member' })
       ).data!;
-      await memberApi.invites({ token: join.token }).accept.post();
+      expect((await memberApi.invites({ token: join.token }).accept.post()).status).toBe(200);
       const body = { targetTeamId: target.id, sourceTeamId: source.teamId, projectId: source.id };
       expect((await api.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(409);
-      const targetRole = (await api.teams({ teamId: target.id }).roles.options.get()).data![0];
+      const targetRole = (
+        await api.teams({ teamId: target.id }).roles.post({ name: 'Reviewer', permissions: {} })
+      ).data!;
+      // Only system roles can be default, so the destination default is the system member role.
+      const systemDefault = (await api.teams({ teamId: target.id }).roles.options.get()).data!.find(
+        (r) => r.system && r.isDefault,
+      )!;
       expect(
         (
           await api.projects({ projectKey: source.ref }).transfer.post({
@@ -159,9 +175,78 @@ describe('project transfers', () => {
       expect((await memberApi.projects({ projectKey: 'destination.MOVE' }).get()).status).toBe(200);
       const members = (await api.projects({ projectKey: 'destination.MOVE' }).members.get()).data!
         .items;
-      expect(members.find((m) => m.userId === member.userId)?.roleId).toBe(targetRole.id);
+      expect(members.find((m) => m.userId === member.userId)?.roleId).toBe(
+        useDefault ? systemDefault.id : targetRole.id,
+      );
     },
   );
+
+  it('keeps a system role through a transfer without a role mapping', async () => {
+    const { api, source, target } = await setup();
+    // A non-default system role, so a member who was wrongly remapped to the default shows.
+    const [observer] = await db
+      .insert(teamRole)
+      .values({ name: 'Observer', teamId: null, isDefault: false, permissions: emptyPermissions() })
+      .returning({ id: teamRole.id });
+    const member = await signUpTestUser();
+    const memberApi = authedApi(member.cookie);
+    const invite = (
+      await api
+        .projects({ projectKey: source.ref })
+        .invites.post({ email: member.email, role: 'member', roleId: observer.id })
+    ).data!;
+    expect((await memberApi.invites({ token: invite.token }).accept.post()).status).toBe(200);
+    const join = (
+      await api.teams({ teamId: target.id }).invites.post({ email: member.email, role: 'member' })
+    ).data!;
+    expect((await memberApi.invites({ token: join.token }).accept.post()).status).toBe(200);
+    const preview = (
+      await api
+        .projects({ projectKey: source.ref })
+        .transfer.preview.post({ targetTeamId: target.id })
+    ).data!;
+    expect(preview.blockers).toEqual([]);
+    expect(preview.requiredRoles).toEqual([]);
+    const body = { targetTeamId: target.id, sourceTeamId: source.teamId, projectId: source.id };
+    expect((await api.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(200);
+    const members = (await api.projects({ projectKey: 'destination.MOVE' }).members.get()).data!
+      .items;
+    expect(members.find((m) => m.userId === member.userId)?.roleId).toBe(observer.id);
+  });
+
+  it('maps a source role to a destination system role', async () => {
+    const { api, source, target } = await setup();
+    const [observer] = await db
+      .insert(teamRole)
+      .values({ name: 'Observer', teamId: null, isDefault: false, permissions: emptyPermissions() })
+      .returning({ id: teamRole.id });
+    const sourceRole = (await createRole(api, source.key, { name: 'Analyst', permissions: {} }))
+      .data!;
+    const member = await signUpTestUser();
+    const memberApi = authedApi(member.cookie);
+    const invite = (
+      await api
+        .projects({ projectKey: source.ref })
+        .invites.post({ email: member.email, role: 'member', roleId: sourceRole.id })
+    ).data!;
+    expect((await memberApi.invites({ token: invite.token }).accept.post()).status).toBe(200);
+    const join = (
+      await api.teams({ teamId: target.id }).invites.post({ email: member.email, role: 'member' })
+    ).data!;
+    expect((await memberApi.invites({ token: join.token }).accept.post()).status).toBe(200);
+    const body = { targetTeamId: target.id, sourceTeamId: source.teamId, projectId: source.id };
+    expect(
+      (
+        await api.projects({ projectKey: source.ref }).transfer.post({
+          ...body,
+          roleMappings: [{ sourceRoleId: sourceRole.id, targetRoleId: observer.id }],
+        })
+      ).status,
+    ).toBe(200);
+    const members = (await api.projects({ projectKey: 'destination.MOVE' }).members.get()).data!
+      .items;
+    expect(members.find((m) => m.userId === member.userId)?.roleId).toBe(observer.id);
+  });
 
   it('blocks pending invitations and attached agents', async () => {
     const { api, source, target } = await setup();
@@ -179,6 +264,43 @@ describe('project transfers', () => {
       .transfer.preview.post({ targetTeamId: target.id });
     expect(preview.data?.blockers.map((b) => b.code)).toContain('pending_invites');
     expect(preview.data?.blockers.map((b) => b.code)).toContain('agent_members');
+  });
+
+  it('blocks a transfer while an agent still triggers on the custom fields of the project', async () => {
+    const { api, source, target } = await setup();
+    const created = (
+      await createAgent(api, source.key, { name: 'Watcher', username: 'watcher', kind: 'external' })
+    ).data!;
+    const [field] = await db
+      .insert(customField)
+      .values({ projectId: source.id, name: 'Priority', fieldType: 'text' })
+      .returning({ id: customField.id });
+    await db.insert(agentFieldTrigger).values({ agentId: created.agent.id, fieldId: field.id });
+    const preview = (
+      await api
+        .projects({ projectKey: source.ref })
+        .transfer.preview.post({ targetTeamId: target.id })
+    ).data!;
+    expect(preview.canTransfer).toBe(false);
+    expect(preview.blockers.map((b) => b.code)).toContain('agent_field_triggers');
+    const body = { projectId: source.id, sourceTeamId: source.teamId, targetTeamId: target.id };
+    expect((await api.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(409);
+  });
+
+  it('refuses a transfer to the source team itself', async () => {
+    const { api, source } = await setup();
+    const body = { projectId: source.id, sourceTeamId: source.teamId, targetTeamId: source.teamId };
+    expect(
+      (
+        await api
+          .projects({ projectKey: source.ref })
+          .transfer.preview.post({ targetTeamId: source.teamId })
+      ).status,
+    ).toBe(400);
+    expect((await api.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(400);
+    expect((await api.projects({ projectKey: source.ref }).get()).data?.project.teamId).toBe(
+      source.teamId,
+    );
   });
 
   it('rejects missing teams, invalid IDs, mismatched project IDs and source expectations', async () => {
@@ -207,7 +329,7 @@ describe('project transfers', () => {
           .status,
       ).toBe(400);
     }
-    const other = (await api.projects.post({ key: 'OTHER', name: 'Other' })).data!;
+    const other = (await createProject(api, { key: 'OTHER', name: 'Other' })).data!;
     expect(
       (
         await api.projects({ projectKey: source.ref }).transfer.post({
@@ -224,8 +346,14 @@ describe('project transfers', () => {
     const adminApi = authedApi(admin.cookie);
     const owner = await signUpTestUser();
     const api = authedApi(owner.cookie);
-    const source = (await api.projects.post({ key: 'MOVE', name: 'Project' })).data!;
-    const target = (await adminApi.teams.post({ name: 'Destination', slug: 'destination' })).data!;
+    const source = (await createProject(api, { key: 'MOVE', name: 'Project' })).data!;
+    const target = (
+      await adminApi.teams.post({
+        name: 'Destination',
+        slug: 'destination',
+        workspaceId: await ownWorkspaceId(adminApi),
+      })
+    ).data!;
     const preview = () =>
       api.projects({ projectKey: source.ref }).transfer.preview.post({ targetTeamId: target.id });
     expect((await preview()).status).toBe(404);
@@ -234,7 +362,7 @@ describe('project transfers', () => {
         .teams({ teamId: target.id })
         .invites.post({ email: owner.email, role: 'member' })
     ).data!;
-    await api.invites({ token: invite.token }).accept.post();
+    expect((await api.invites({ token: invite.token }).accept.post()).status).toBe(200);
     expect((await preview()).status).toBe(403);
     const body = { projectId: source.id, sourceTeamId: source.teamId, targetTeamId: target.id };
     expect((await api.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(403);
@@ -242,8 +370,12 @@ describe('project transfers', () => {
       .teams({ teamId: target.id })
       .members({ userId: owner.userId })
       .patch({ role: 'manager' });
-    expect((await preview()).status).toBe(200);
-    expect((await api.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(200);
+    // The manager clears the authority check. Each user owns a workspace of their own, so
+    // the transfer then stops at the same-workspace rule, which runs after authority.
+    const sameWorkspace = await preview();
+    expect(sameWorkspace.status).toBe(409);
+    expect((sameWorkspace.error?.value as { error: string }).error).toContain('same workspace');
+    expect((await api.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(409);
   });
 
   it('refuses agent callers and MCP-disabled destination teams', async () => {
@@ -253,8 +385,19 @@ describe('project transfers', () => {
     ).data!;
     const agentApi = apiKeyApi(created.apiKey!);
     const body = { projectId: source.id, sourceTeamId: source.teamId, targetTeamId: target.id };
-    expect((await agentApi.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(
-      403,
+    // A plain agent is refused before the explicit "Agents cannot transfer" check, which
+    // stays as a backstop for an agent whose standing was raised some other way.
+    const agentPreview = await agentApi
+      .projects({ projectKey: source.ref })
+      .transfer.preview.post({ targetTeamId: target.id });
+    expect(agentPreview.status).toBe(403);
+    expect((agentPreview.error?.value as { error: string }).error).toBe(
+      'Only a team owner or manager can do this',
+    );
+    const agentTransfer = await agentApi.projects({ projectKey: source.ref }).transfer.post(body);
+    expect(agentTransfer.status).toBe(403);
+    expect((agentTransfer.error?.value as { error: string }).error).toBe(
+      'Only an owner or manager of both teams may transfer a project',
     );
     await api.teams({ teamId: target.id }).mcp.patch({ enabled: false });
     const mcpApi = authedApi(user.cookie, { 'x-mcp-loopback': '1' });
@@ -356,17 +499,78 @@ describe('project transfers', () => {
     );
   });
 
+  it('reports an archived project as a blocker when nothing else blocks it', async () => {
+    const { api, source, target } = await setup();
+    await api.teams({ teamId: source.teamId }).projects({ projectId: source.id }).archive.post();
+    const preview = (
+      await api
+        .projects({ projectKey: source.ref })
+        .transfer.preview.post({ targetTeamId: target.id })
+    ).data!;
+    expect(preview.canTransfer).toBe(false);
+    expect(preview.blockers.map((b) => b.code)).toEqual(['archived_project']);
+  });
+
+  it('lets a manager of both teams transfer within their shared workspace', async () => {
+    const owner = await signUpTestUser();
+    const api = authedApi(owner.cookie);
+    const source = (await createProject(api, { key: 'MOVE', name: 'Project' })).data!;
+    const target = (
+      await api.teams.post({
+        name: 'Destination',
+        slug: 'destination',
+        workspaceId: await ownWorkspaceId(api),
+      })
+    ).data!;
+    const manager = await signUpTestUser();
+    const managerApi = authedApi(manager.cookie);
+    for (const teamId of [source.teamId, target.id]) {
+      const invite = (
+        await api.teams({ teamId }).invites.post({ email: manager.email, role: 'member' })
+      ).data!;
+      expect((await managerApi.invites({ token: invite.token }).accept.post()).status).toBe(200);
+      await api.teams({ teamId }).members({ userId: manager.userId }).patch({ role: 'manager' });
+    }
+    const body = { projectId: source.id, sourceTeamId: source.teamId, targetTeamId: target.id };
+    expect(
+      (
+        await managerApi
+          .projects({ projectKey: source.ref })
+          .transfer.preview.post({ targetTeamId: target.id })
+      ).status,
+    ).toBe(200);
+    expect((await managerApi.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(
+      200,
+    );
+  });
+
   it('serializes competing transfers with only one destination succeeding', async () => {
     const { api, source, target } = await setup();
-    const third = (await api.teams.post({ name: 'Third', slug: 'third-team' })).data!;
+    const third = (
+      await api.teams.post({
+        name: 'Third',
+        slug: 'third-team',
+        workspaceId: await ownWorkspaceId(api),
+      })
+    ).data!;
+    const ids = [target.id, third.id];
     const results = await Promise.all(
-      [target.id, third.id].map((targetTeamId) =>
+      ids.map((targetTeamId) =>
         api
           .projects({ projectKey: source.ref })
           .transfer.post({ targetTeamId, sourceTeamId: source.teamId, projectId: source.id }),
       ),
     );
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
-    expect((await api.projects.get()).data?.filter((p) => p.id === source.id)).toHaveLength(1);
+    // Whichever request won, the outcome is decided by the responses, not by arrival order.
+    const win = results.findIndex((r) => r.status === 200);
+    const lose = 1 - win;
+    expect(results[win].data?.teamId).toBe(ids[win]);
+    expect((results[lose].error?.value as { error: string }).error).toBe(
+      'The project has moved to another team',
+    );
+    const moved = (await api.projects({ projectKey: results[win].data!.ref }).get()).data!;
+    expect(moved.project.teamId).toBe(ids[win]);
+    expect(moved.project.teamId).not.toBe(ids[lose]);
   });
 });

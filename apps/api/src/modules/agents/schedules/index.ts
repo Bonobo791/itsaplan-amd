@@ -46,7 +46,7 @@ export const agentScheduleRoutes = new Elysia({
     ({ project, user, query }) =>
       paginate(query, (window) => listAgentSchedules(project.id, requireUser(user).id, window)),
     {
-      permission: ['ai_agents', 'read'],
+      permission: ['agent_schedules', 'read'],
       query: agentSchedulePageQuery,
       response: { 200: AgentSchedulePageResponse, ...accessErrors },
       detail: {
@@ -90,13 +90,14 @@ export const agentScheduleRoutes = new Elysia({
     },
     {
       body: createScheduleBody,
-      permission: ['ai_agents', 'create'],
+      permission: ['agent_schedules', 'create'],
       response: { 201: AgentScheduleResponse, ...commonErrors, ...errors(409) },
       detail: {
         summary: 'Create an agent schedule',
         description:
           'Create a schedule that sends a task to an agent on a cron, on an issue each ' +
-          'time one enters a column, or on a type this instance adds.',
+          'time one enters a column, or on a type this instance adds. It starts active ' +
+          'unless status is given.',
         ...mcpTool('create_agent_schedule'),
       },
     },
@@ -106,6 +107,12 @@ export const agentScheduleRoutes = new Elysia({
     async ({ project, params, body, user }) => {
       const current = await getAgentSchedule(project.id, params.scheduleId, requireUser(user).id);
       if (!current) throw new HttpError(404, 'Schedule not found');
+      if (!current.supported) {
+        throw new HttpError(
+          409,
+          'This schedule was set up with Cloud or Pro and does not run here; it can only be deleted',
+        );
+      }
       const trigger = await scheduleTriggerFields(project, current.type, body);
       // A resumed cron schedule runs next from now, not from when it was paused.
       const resuming = body.status === 'active' && current.status === 'paused';
@@ -143,13 +150,13 @@ export const agentScheduleRoutes = new Elysia({
     {
       params: scheduleParams,
       body: updateScheduleBody,
-      permission: ['ai_agents', 'edit'],
+      permission: ['agent_schedules', 'edit'],
       response: { 200: AgentScheduleResponse, ...commonErrors, ...errors(409) },
       detail: {
         summary: 'Update an agent schedule',
         description:
           "Update a schedule's agent, task, cron or column, options, or status. Its type stays " +
-          'the one it was created with.',
+          'the one it was created with. A schedule that is not supported here answers 409.',
         ...mcpTool('update_agent_schedule'),
       },
     },
@@ -164,7 +171,7 @@ export const agentScheduleRoutes = new Elysia({
     },
     {
       params: scheduleParams,
-      permission: ['ai_agents', 'delete'],
+      permission: ['agent_schedules', 'delete'],
       response: { 204: t.Void(), ...commonErrors },
       detail: {
         summary: 'Delete an agent schedule',
@@ -187,7 +194,7 @@ export const agentScheduleRoutes = new Elysia({
     },
     {
       params: scheduleParams,
-      permission: ['ai_agents', 'edit'],
+      permission: ['agent_schedules', 'edit'],
       response: { 202: QueuedRunResponse, ...commonErrors },
       detail: {
         summary: 'Run an agent schedule now',
@@ -212,7 +219,7 @@ export const agentScheduleRoutes = new Elysia({
     },
     {
       params: scheduleParams,
-      permission: ['ai_agents', 'edit'],
+      permission: ['agent_schedules', 'edit'],
       response: { 200: CanceledRunsResponse, ...commonErrors },
       detail: {
         summary: 'End the pending runs of an agent schedule',
@@ -238,7 +245,7 @@ export const agentScheduleRoutes = new Elysia({
     },
     {
       params: scheduleRunParams,
-      permission: ['ai_agents', 'edit'],
+      permission: ['agent_schedules', 'edit'],
       response: { 200: CanceledRunsResponse, ...commonErrors },
       detail: {
         summary: 'End one pending run of an agent schedule',
@@ -256,7 +263,7 @@ export const agentScheduleRoutes = new Elysia({
     },
     {
       params: scheduleParams,
-      permission: ['ai_agents', 'read'],
+      permission: ['agent_schedules', 'read'],
       response: { 200: ScheduleRunListResponse, ...commonErrors },
       detail: {
         summary: 'List agent schedule runs',

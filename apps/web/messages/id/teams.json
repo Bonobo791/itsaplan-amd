@@ -20,6 +20,10 @@
       "title": "Proyek",
       "description": "Proyek yang dimiliki tim ini."
     },
+    "templates": {
+      "title": "Templat proyek",
+      "description": "Pengaturan tersimpan yang menjadi awal proyek baru."
+    },
     "members": {
       "title": "Anggota tim",
       "description": "Semua orang di tim, dan undangan yang masih terbuka."
@@ -51,6 +55,13 @@
     "agents": {
       "title": "Agen AI",
       "description": "Agen AI yang dimiliki tim ini, dan proyek tempat mereka bekerja."
+    },
+    "analytics": {
+      "title": "Penggunaan",
+      "description": "Biaya model yang dipakai agen tim, per agen, proyek, dan hari."
+    },
+    "queue": {
+      "title": "Eksekusi agen"
     }
   },
   "info": {
@@ -67,15 +78,16 @@
     "leaveHint": "Anda tetap menjadi anggota proyek yang Anda ikuti. Untuk bergabung kembali, pemilik harus menambahkan Anda lagi.",
     "delete": {
       "action": "Hapus tim",
-      "hint": "Anggota, peran, undangan, keterampilan, alat, dan integrasinya ikut dihapus. Orang-orang tetap memiliki akun dan tim lain mereka.",
+      "hint": "Anggota, peran, templat proyek, undangan, keterampilan, alat, dan integrasinya ikut dihapus. Orang-orang tetap memiliki akun dan tim lain mereka.",
       "blocked": "Hapus dulu proyek dan agen AI milik tim.",
       "title": "Hapus {name}?",
-      "description": "<strong>{name}</strong> dihapus beserta anggota, peran, undangan, keterampilan, alat, dan integrasinya. Orang-orang tetap memiliki akun dan tim lain mereka. Tindakan ini tidak dapat dibatalkan.",
+      "description": "<strong>{name}</strong> dihapus beserta anggota, peran, templat proyek, undangan, keterampilan, alat, dan integrasinya. Orang-orang tetap memiliki akun dan tim lain mereka. Tindakan ini tidak dapat dibatalkan.",
       "deleted": "Tim dihapus"
     }
   },
   "columns": {
     "project": "Proyek",
+    "template": "Templat",
     "owners": "Pemilik",
     "members": "Anggota",
     "created": "Dibuat",
@@ -91,6 +103,7 @@
     "emailPlaceholder": "nama@example.com",
     "alreadyMember": "{email} sudah berada di tim ini",
     "alreadyPending": "{email} sudah memiliki undangan tertunda",
+    "domainNotAllowed": "Domain {email} tidak diizinkan di instance ini",
     "refused": "{email} tidak dapat diundang",
     "roleLabel": "Peran tim",
     "roleHint": {
@@ -103,11 +116,16 @@
     "joinsProject": "Bergabung ke tim dan {project}",
     "copyLink": "Salin tautan",
     "copied": "Disalin",
+    "resendEmail": "Kirim email",
+    "resendingEmail": "Mengirim…",
     "revokeAction": "Cabut undangan",
     "revokeTitle": "Cabut undangan untuk {email}?",
     "revokeConfirm": "Cabut undangan",
     "revokeDescription": "Tautan tidak akan berfungsi lagi. Anda dapat mengundangnya lagi nanti.",
-    "pending": "Diundang"
+    "pending": "Diundang",
+    "expiredAt": "kedaluwarsa {date}",
+    "renew": "Perbarui",
+    "renewing": "Memperbarui…"
   },
   "manage": {
     "label": "Kelola tim",
@@ -128,9 +146,9 @@
     "search": "Cari peran",
     "noMatches": "Tidak ada peran yang cocok dengan “{query}”.",
     "default": "Bawaan",
+    "system": "Sistem",
     "editAction": "Ubah peran",
     "deleteAction": "Hapus peran",
-    "defaultUndeletable": "Peran bawaan tidak dapat dihapus",
     "deleteTitle": "Hapus peran \"{name}\"",
     "deleteDescription": "Tidak ada yang menggunakan peran ini. Tindakan ini tidak dapat dibatalkan.",
     "deleteInUse": "Peran ini masih digunakan. Pilih peran tujuan untuk memindahkan semua yang menggunakannya.",
@@ -144,16 +162,6 @@
     "moveAndDelete": "Pindahkan dan hapus",
     "noTargetRole": "Tidak ada peran lain untuk tujuan pemindahan. Buat peran baru terlebih dahulu.",
     "newRole": "Peran baru",
-    "editorTitleEdit": "Ubah peran",
-    "editorTitleNew": "Peran baru",
-    "namePlaceholder": "cth. Kontributor",
-    "resourceColumn": "Sumber daya",
-    "toggleActionAll": "Aktifkan atau nonaktifkan {action} untuk semua sumber daya",
-    "toggleGroupAll": "Aktifkan atau nonaktifkan semua izin {group}",
-    "toggleActionGroup": "Aktifkan atau nonaktifkan {action} untuk {group}",
-    "cellAria": "{resource}: {action}",
-    "saveRole": "Simpan peran",
-    "createRole": "Buat peran",
     "copyRoles": "Salin peran",
     "pasteRoles": "Tempel peran",
     "nothingToCopy": "Tidak ada peran kustom untuk disalin.",
@@ -170,13 +178,87 @@
       "actions": {
         "create": "Baru",
         "update": "Timpa",
-        "skip": "Lewati (bawaan)"
+        "skip": "Lewati (peran sistem)"
       }
     },
     "transferErrors": {
       "invalidJson": "Papan klip tidak berisi JSON yang valid.",
       "notAnExport": "Papan klip tidak berisi ekspor peran.",
       "empty": "Ekspor peran kosong."
+    }
+  },
+  "templates": {
+    "empty": "Belum ada templat proyek",
+    "emptyHint": "Simpan proyek sebagai templat untuk membuat proyek baru darinya.",
+    "newAction": "Templat baru",
+    "teams": "Tim",
+    "allTeams": "Semua tim",
+    "noTeams": "Tidak ada tim",
+    "editAction": "Edit templat",
+    "editHint": "Isi templat tetap seperti saat disimpan.",
+    "copyAction": "Salin templat",
+    "copied": "Templat \"{name}\" disalin. Tempelkan di ruang kerja lain untuk mengimpornya.",
+    "downloadAction": "Unduh",
+    "downloadFailed": "Tidak dapat mengunduh templat.",
+    "importAction": "Impor templat",
+    "deleteAction": "Hapus templat",
+    "deleteDialog": {
+      "title": "Hapus templat \"{name}\"?",
+      "description": "Proyek yang dibuat dari templat ini tidak berubah.",
+      "confirm": "Hapus templat",
+      "galleryNote": "Halamannya di galeri juga diturunkan."
+    },
+    "panel": {
+      "saved": "Disimpan {date}",
+      "none": "Tidak ada",
+      "teams": "Tim: {teams}"
+    },
+    "publish": {
+      "action": "Terbitkan",
+      "published": "Diterbitkan",
+      "account": "Akun galeri",
+      "publishingAs": "Menerbitkan sebagai",
+      "authorProfile": "Profil penulis",
+      "changeEmail": "Ganti email",
+      "rules": "Aturan galeri",
+      "unlink": "Putuskan workspace",
+      "downloadable": "Siapa pun bisa mengunduhnya",
+      "private": "Tanpa issue atau orang",
+      "counts": "{states, plural, other {# status}} · {types, plural, other {# jenis}} · {fields, plural, other {# bidang}}",
+      "by": "oleh <b>{name}</b>",
+      "authorHint": "Ditampilkan di setiap templat yang diterbitkan dari {email}.",
+      "authorName": "Penulis",
+      "authorUrl": "Tautan profil",
+      "optional": "Opsional",
+      "authorUrlInvalid": "Harus diawali https://",
+      "submit": "Terbitkan",
+      "update": "Perbarui halaman",
+      "live": "Aktif",
+      "since": "sejak {date}",
+      "openPage": "Buka halaman",
+      "copyLink": "Salin tautan",
+      "linkCopied": "Tautan disalin",
+      "copyFailed": "Tidak dapat menyalin tautan",
+      "unpublish": "Batalkan terbitan",
+      "unpublishConfirm": "Turunkan halaman?",
+      "unpublishHint": "Tautannya tidak akan berfungsi lagi.",
+      "keep": "Biarkan",
+      "publishedToast": "Diterbitkan",
+      "updatedToast": "Halaman diperbarui",
+      "badge": "Publik",
+      "badgeHint": "Di galeri sejak {date}",
+      "link": {
+        "intro": "Konfirmasikan email sekali untuk workspace ini.",
+        "email": "Email",
+        "emailHint": "Tidak ditampilkan publik",
+        "agree": "Dengan mengirim kode, Anda menerima <rules>aturan galeri</rules>.",
+        "sendCode": "Kirim kode",
+        "codeSent": "Masukkan kode yang dikirim ke {email}",
+        "code": "Kode",
+        "confirm": "Konfirmasi",
+        "resend": "Kirim lagi",
+        "resent": "Kode baru terkirim"
+      }
     }
   },
   "panel": {
@@ -230,6 +312,8 @@
     "timeout": "Batas waktu (dtk)",
     "optional": "Opsional",
     "apiKey": "Kunci API",
+    "from": "Alamat pengirim (From)",
+    "fromHint": "Wajib untuk Resend. Dengan SMTP, nilai bawaannya adalah nama pengguna.",
     "telegramBot": "Bot Telegram",
     "telegramBotHint": "Bot yang mengirimkan notifikasi untuk setiap proyek tim. Anggota memilih obrolan masing-masing di preferensi mereka. Token disimpan secara terenkripsi.",
     "botToken": "Token API bot (opsional)",
@@ -369,6 +453,8 @@
     "username": "Nama pengguna",
     "usernamePlaceholder": "cth. triage-bot",
     "usernameHint": "Huruf, angka, titik, tanda hubung, dan garis bawah. Hingga 64 karakter.",
+    "chat": "Obrolan",
+    "chatHint": "Memungkinkan anggota membuka atau melanjutkan obrolan dengan agen ini. Jika dimatikan, agen hilang dari pemilih obrolan; sebutan, delegasi, dan jadwal tetap menjalankannya.",
     "access": "Ketersediaan",
     "accessHint": "Siapa yang dapat memberi tugas kepada agen ini",
     "model": "Model",
@@ -400,8 +486,46 @@
     "runDelay": "Tunggu sebelum memulai",
     "runDelayHint": "Waktu untuk terus mengedit issue sebelum agen dimulai. 0 langsung memulai.",
     "minutes": "mnt",
-    "runner": "Runner",
-    "runnerHint": "Proses di komputer Anda yang menjalankan tugas agen ini",
+    "connection": "Koneksi",
+    "connectionHint": "Cara agen menerima tugasnya",
+    "deliveryRunner": "Runner",
+    "deliveryRunnerHint": "Komputer Anda meminta tugas",
+    "deliveryUrl": "Endpoint",
+    "deliveryUrlHint": "URL Anda menerima tugas",
+    "invocationUrl": "URL endpoint",
+    "invocationUrlPlaceholder": "https://example.com/agent",
+    "invocationUrlHint": "Menerima setiap tugas dan pesan chat sebagai POST yang ditandatangani.",
+    "invocationUnsaved": "Simpan agar tugas dikirim ke URL ini.",
+    "invocationSecretOnSave": "Simpan URL untuk mendapatkan rahasia tanda tangan.",
+    "invocationSecret": "Rahasia tanda tangan",
+    "invocationSecretHint": "Gunakan untuk memeriksa header X-Itsaplan-Signature.",
+    "invocationSecretRotated": "Rahasia tanda tangan dibuat ulang",
+    "invocationRotate": "Buat ulang rahasia",
+    "invocationRotateTitle": "Buat ulang rahasia tanda tangan?",
+    "invocationRotateMessage": "Permintaan untuk <v>{name}</v> langsung memakai rahasia baru. Perbarui endpoint Anda, atau endpoint akan menolak tugas berikutnya.",
+    "invocationTest": "Permintaan uji",
+    "invocationTestHint": "Mengirim ping bertanda tangan ke URL yang disimpan.",
+    "invocationTestSend": "Kirim uji",
+    "invocationTestSending": "Mengirim…",
+    "invocationTestOk": "Menjawab {status} dalam {ms} ms",
+    "invocationTestRefused": "Menjawab {status}. Seharusnya 2xx.",
+    "invocationTestTimeout": "Tidak ada jawaban tepat waktu. Jawab dulu, lalu kerjakan tugasnya.",
+    "invocationTestUnreachable": "Tidak dapat menghubungi endpoint",
+    "invocationHelpOpen": "Cara membuat endpoint",
+    "invocationHelpTitle": "Cara menerima tugas di URL",
+    "invocationHelpVerify": "Periksa tanda tangan",
+    "invocationHelpVerifyHint": "HMAC-SHA256 dari stempel waktu, titik, dan body mentah, dengan rahasia tanda tangan sebagai kunci. Tolak permintaan yang lebih lama dari lima menit.",
+    "invocationHelpAccept": "Segera jawab 2xx",
+    "invocationHelpAcceptHint": "Kerjakan setelah Anda menjawab. Dengan status lain, tugas dikirim lagi nanti dan pesan chat langsung gagal.",
+    "invocationHelpPayload": "Baca tugasnya",
+    "invocationHelpPayloadHint": "Kolom event menyebutkan apa yang tiba: tugas, pesan chat, atau ping uji.",
+    "invocationHelpTabRun": "Tugas",
+    "invocationHelpTabChat": "Pesan chat",
+    "invocationHelpTabPing": "Ping uji",
+    "invocationHelpReport": "Kirim hasil dengan kunci agen",
+    "invocationHelpReportHint": "Selama bekerja, kirim heartbeat setidaknya setiap 5 menit. Lalu kirim hasilnya. Jawaban chat bisa dikirim bertahap.",
+    "invocationHelpTest": "Kirim permintaan uji",
+    "invocationHelpTestHint": "Bagian Koneksi menampilkan jawaban endpoint Anda.",
     "runnerWayCli": "CLI Runner",
     "runnerWayCliHint": "Paket npm kami. Hubungkan ke agen coding; paket ini akan memeriksa tugas secara berkala dan melaporkan hasilnya. Memerlukan file konfigurasi dengan kunci agen.",
     "runnerWayApi": "Kode Anda sendiri",
@@ -424,7 +548,7 @@
     "runnerHelpTabCustom": "Milik Anda sendiri",
     "runnerHelpPiAdapter": "Pi membaca .mcp.json melalui ekstensi. Pasang sekali: pi install npm:pi-mcp-adapter",
     "runnerHelpCheck": "Periksa apakah terhubung",
-    "runnerHelpCheckHint": "Bagian Runner menampilkan Online.",
+    "runnerHelpCheckHint": "Bagian Koneksi menampilkan Online.",
     "runnerOnline": "Runner online",
     "runnerOffline": "Runner offline",
     "runnerNever": "Belum ada runner",
@@ -432,6 +556,8 @@
     "runnerStateOffline": "Offline",
     "runnerStateNone": "Tidak terhubung",
     "runnerSeen": "Terakhir terlihat {time} lalu",
+    "runnerStateUrl": "Endpoint",
+    "runnerUrl": "Menerima tugas di URL-nya",
     "actions": "Tindakan",
     "actionsHint": "Apa yang dapat dilakukan agen dalam proyek",
     "searchActions": "Cari tindakan",
@@ -461,7 +587,7 @@
     "goToTools": "Buka Alat",
     "searchTools": "Cari alat",
     "advanced": "Tingkat lanjut",
-    "advancedHint": "Sampling, penalaran, batas langkah, dan memori",
+    "advancedHint": "Sampling, penalaran, batas langkah dan waktu, serta memori",
     "temperature": "Temperatur",
     "reasoningEffort": "Upaya penalaran",
     "reasoningEffortDefault": "Bawaan penyedia",
@@ -470,6 +596,8 @@
     "reasoningEffortHigh": "Tinggi",
     "optional": "Opsional",
     "maxSteps": "Maks langkah",
+    "runTimeout": "Batas waktu jalan (dtk)",
+    "runTimeoutDefault": "Maksimum instans",
     "memory": "Memori percakapan",
     "memoryHint": "Mengingat pesan terbaru dalam utas percakapan.",
     "memoryCount": "Ingat N pesan terakhir",
@@ -493,6 +621,7 @@
     "endOfHistory": "Akhir riwayat",
     "manualTask": "Tugas manual",
     "scheduledTask": "Tugas terjadwal",
+    "documentTask": "Komentar di dokumen",
     "failed": "Gagal",
     "task": "Tugas",
     "error": "Kesalahan",
@@ -587,6 +716,26 @@
       "managers": "Pemilik dan admin",
       "members": "Semua orang di timnya"
     },
+    "runLimit": {
+      "title": "Eksekusi agen bersamaan",
+      "description": "Berapa banyak eksekusi agennya yang berjalan bersamaan. Sisanya menunggu dalam antrean. 0 berarti tanpa batas sendiri.",
+      "descriptionCapped": "Berapa banyak eksekusi agennya yang berjalan bersamaan, paling banyak {max}. Sisanya menunggu dalam antrean. Dengan 0, batasnya {max}.",
+      "ownerOnly": "Hanya pemilik yang mengubah berapa banyak eksekusi agen yang berjalan bersamaan.",
+      "none": "Tanpa batas"
+    },
+    "sharing": {
+      "title": "Tautan publik",
+      "description": "Apakah dokumen, isu, dan tampilan di workspace ini bisa dibagikan lewat tautan.",
+      "enabled": "Izinkan tautan publik",
+      "enabledHint": "Jika dimatikan, tidak ada yang bisa berbagi di sini dan tautan yang ada berhenti terbuka sampai dinyalakan lagi.",
+      "instanceOff": "Tautan publik dimatikan untuk instance ini.",
+      "teamsOnly": "Hanya tim terpilih",
+      "teamsOnlyHint": "Hanya tim di bawah ini yang bisa berbagi. Tautan tim lain berhenti terbuka.",
+      "statusOn": "Aktif",
+      "statusOff": "Nonaktif",
+      "ownerOnly": "Hanya pemilik yang memilih tim mana yang bisa berbagi.",
+      "saved": "Pengaturan tautan publik disimpan"
+    },
     "managers": {
       "title": "Pengelola",
       "description": "Pemilik dan admin mengelola workspace.",
@@ -658,6 +807,56 @@
       "title": "Hapus {name}?",
       "description": "<strong>{name}</strong> dan timnya akan dihapus. Orang-orang tetap memiliki akun dan tim lain mereka. Tindakan ini tidak dapat dibatalkan.",
       "deleted": "Workspace dihapus"
+    },
+    "agentUsage": {
+      "title": "Penggunaan AI",
+      "description": "Biaya model yang dipakai agen semua tim."
+    },
+    "settingsGroup": "Pengaturan",
+    "modelPrices": {
+      "title": "Harga model",
+      "description": "Penggunaan AI menghitung biaya setiap panggilan model dengan harga ini, per 1M token. Perubahan juga menghitung ulang panggilan lama.",
+      "used": {
+        "title": "Dipakai di workspace ini",
+        "description": "Model yang dipanggil agen Anda dalam 90 hari terakhir, dan model yang Anda beri harga.",
+        "unpriced": "{count, plural, other {# model tidak punya harga, jadi panggilannya tidak masuk ke biaya.}}",
+        "empty": "Tidak ada panggilan model dalam 90 hari terakhir. Model muncul di sini setelah agen Anda memanggilnya."
+      },
+      "all": {
+        "title": "Semua model",
+        "description": "Harga bawaan. Tetapkan harga Anda sendiri untuk model mana pun.",
+        "search": "Cari model",
+        "noMatch": "Tidak ada model yang cocok dengan “{query}”."
+      },
+      "columns": {
+        "model": "Model",
+        "calls": "Panggilan",
+        "input": "Input",
+        "output": "Output",
+        "cacheRead": "Baca cache",
+        "cacheWrite": "Tulis cache",
+        "price": "Harga"
+      },
+      "source": {
+        "own": "Milik Anda",
+        "builtIn": "Bawaan",
+        "none": "Tanpa harga"
+      },
+      "setPrice": "Tetapkan harga",
+      "edit": "Ubah",
+      "setTitle": "Tetapkan harga",
+      "editTitle": "Ubah harga",
+      "perMillion": "USD per 1M token.",
+      "builtInPrice": "Bawaan: {input} input, {output} output.",
+      "noBuiltInPrice": "Model ini tidak punya harga bawaan.",
+      "sameAsInput": "Sama dengan input",
+      "appliesToPast": "Berlaku untuk semua panggilan model ini di workspace ini, termasuk yang lama.",
+      "useBuiltIn": "Pakai harga bawaan",
+      "removePrice": "Hapus harga",
+      "save": "Simpan harga"
+    },
+    "queue": {
+      "title": "Eksekusi agen"
     }
   }
 }

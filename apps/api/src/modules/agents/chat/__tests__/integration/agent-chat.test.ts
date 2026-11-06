@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { app, apiKeyApi, authedApi, type Api } from '#tests/helpers/app';
+import { app, apiKeyApi, authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { addProjectMember } from '#tests/helpers/members';
@@ -26,7 +26,7 @@ it('caps configured claim wait below the runner request timeout', () => {
 async function setup() {
   const owner = await signUpTestUser({ name: 'Owner' });
   const asOwner = authedApi(owner.cookie);
-  await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   const created = await createAgent(asOwner, 'MKT', {
     name: 'Ext Bot',
     username: 'ext',
@@ -99,6 +99,17 @@ describe('external agent chat', () => {
     // is told so along with the project it works in.
     expect(claimed.data!.message!.systemPrompt).toContain('Run mode');
     expect(claimed.data!.message!.systemPrompt).toContain('Marketing');
+  });
+
+  it('rejects sending a message to a chat-disabled agent with 403', async () => {
+    const { asOwner, agent } = await setup();
+    await asOwner
+      .teams({ teamId: await teamOf(asOwner, 'MKT') })
+      ['ai-agents']({ agentId: agent.id })
+      .patch({ chatEnabled: false });
+    const res = await send(asOwner, agent.id, 'Status?');
+    expect(res.status).toBe(403);
+    expect(res.error?.value).toMatchObject({ code: 'AGENT_CHAT_DISABLED' });
   });
 
   it("mixes the agent's own instructions into the system prompt", async () => {
