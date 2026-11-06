@@ -1,16 +1,23 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { db, projectMember, teamInvite, agentSchedule, agentRun } from '@repo/db';
+import { db, projectMember, teamInvite, teamMember, agentSchedule, agentRun } from '@repo/db';
 import { and, eq } from 'drizzle-orm';
 import { pgErrorCode } from '#shared/lib';
-import { authedApi } from '#tests/helpers/app';
+import { authedApi, createProject, ownWorkspaceId } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
+import { createRole } from '#tests/helpers/roles';
 
 async function setup() {
   const owner = await signUpTestUser();
   const api = authedApi(owner.cookie);
-  const source = (await api.projects.post({ key: 'MOVE', name: 'Project' })).data!;
-  const target = (await api.teams.post({ name: 'Destination', slug: 'destination' })).data!;
+  const source = (await createProject(api, { key: 'MOVE', name: 'Project' })).data!;
+  const target = (
+    await api.teams.post({
+      name: 'Destination',
+      slug: 'destination',
+      workspaceId: await ownWorkspaceId(api),
+    })
+  ).data!;
   const agent = (
     await api.teams({ teamId: source.teamId })['ai-agents'].post({
       name: 'Worker',
@@ -19,7 +26,8 @@ async function setup() {
       projectIds: [],
     })
   ).data!.agent;
-  const sourceRole = (await api.teams({ teamId: source.teamId }).roles.options.get()).data![0];
+  const sourceRole = (await createRole(api, source.key, { name: 'Analyst', permissions: {} }))
+    .data!;
   expect(
     (
       await api.projects({ projectKey: source.ref }).transfer.post({
@@ -32,9 +40,10 @@ async function setup() {
   return { owner, api, source, target, agent, sourceRole };
 }
 
-async function expectConflict(write: () => Promise<unknown>) {
+async function expectConflict(write: () => Promise<unknown>, reason: string) {
   // Simulate a writer whose API validation happened before the transfer. Its
-  // database commit must independently reject the now-stale team reference.
+  // database commit must independently reject the now-stale team reference, and
+  // for this reason: a check that passes earlier would otherwise hide a missing one.
   let error: unknown;
   try {
     await write();
@@ -42,6 +51,9 @@ async function expectConflict(write: () => Promise<unknown>) {
     error = caught;
   }
   expect(pgErrorCode(error)).toBe('40001');
+  // drizzle wraps the Postgres error; the RAISE text is on its cause.
+  const raised = (error as { cause?: { message?: string } }).cause?.message ?? '';
+  expect(raised).toContain(reason);
 }
 
 describe('project transfer database boundaries', () => {
@@ -49,19 +61,28 @@ describe('project transfer database boundaries', () => {
 
   it('rejects a late source-agent membership and a source-role update', async () => {
     const { owner, api, source, target, agent, sourceRole } = await setup();
-    await expectConflict(async () =>
-      db.insert(projectMember).values({
-        projectId: source.id,
-        userId: agent.userId,
-        role: 'member',
-        roleId: null,
-      }),
+    // The agent is on the destination team, so the membership check passes and the
+    // agent-team check is the one that refuses the row.
+    await db.insert(teamMember).values({ teamId: target.id, userId: agent.userId, role: 'member' });
+    await expectConflict(
+      async () =>
+        db.insert(projectMember).values({
+          projectId: source.id,
+          userId: agent.userId,
+          role: 'member',
+          roleId: null,
+        }),
+      'Project agent belongs to a different team',
     );
-    await expectConflict(async () =>
-      db
-        .update(projectMember)
-        .set({ roleId: sourceRole.id })
-        .where(and(eq(projectMember.projectId, source.id), eq(projectMember.userId, owner.userId))),
+    await expectConflict(
+      async () =>
+        db
+          .update(projectMember)
+          .set({ roleId: sourceRole.id })
+          .where(
+            and(eq(projectMember.projectId, source.id), eq(projectMember.userId, owner.userId)),
+          ),
+      'Project role belongs to a different team',
     );
     const members = (
       await api.teams({ teamId: target.id }).projects({ projectId: source.id }).members.get()
@@ -73,39 +94,73 @@ describe('project transfer database boundaries', () => {
     });
   });
 
+  it('lets a team member hold a system role on a project of the team', async () => {
+    // Default agent members get the system member role, which belongs to no team.
+    const owner = await signUpTestUser();
+    const api = authedApi(owner.cookie);
+    const source = (await createProject(api, { key: 'MOVE', name: 'Project' })).data!;
+    const member = await signUpTestUser();
+    const invite = (
+      await api
+        .teams({ teamId: source.teamId })
+        .invites.post({ email: member.email, role: 'member' })
+    ).data!;
+    await authedApi(member.cookie).invites({ token: invite.token }).accept.post();
+    const systemRole = (await api.teams({ teamId: source.teamId }).roles.options.get()).data!.find(
+      (r) => r.system,
+    )!;
+    await db.insert(projectMember).values({
+      projectId: source.id,
+      userId: member.userId,
+      role: 'member',
+      roleId: systemRole.id,
+    });
+    const [row] = await db
+      .select({ roleId: projectMember.roleId })
+      .from(projectMember)
+      .where(and(eq(projectMember.projectId, source.id), eq(projectMember.userId, member.userId)));
+    expect(row?.roleId).toBe(systemRole.id);
+  });
+
   it('rejects a late source-team invitation', async () => {
     const { api, source, target } = await setup();
-    await expectConflict(async () =>
-      db.insert(teamInvite).values({
-        teamId: source.teamId,
-        projectId: source.id,
-        email: 'late@example.com',
-        projectRole: 'member',
-      }),
+    await expectConflict(
+      async () =>
+        db.insert(teamInvite).values({
+          teamId: source.teamId,
+          projectId: source.id,
+          email: 'late@example.com',
+          projectRole: 'member',
+        }),
+      'Project invitation belongs to a different team',
     );
     expect((await api.teams({ teamId: target.id }).invites.get()).data).toEqual([]);
   });
 
   it('rejects late source-agent schedules and pending runs', async () => {
     const { source, agent } = await setup();
-    await expectConflict(async () =>
-      db.insert(agentSchedule).values({
-        agentId: agent.id,
-        projectId: source.id,
-        name: 'Late schedule',
-        prompt: 'Task',
-        cron: '* * * * *',
-        timezone: 'UTC',
-        nextRunAt: new Date(),
-      }),
+    await expectConflict(
+      async () =>
+        db.insert(agentSchedule).values({
+          agentId: agent.id,
+          projectId: source.id,
+          name: 'Late schedule',
+          prompt: 'Task',
+          cron: '* * * * *',
+          timezone: 'UTC',
+          nextRunAt: new Date(),
+        }),
+      'Project agent belongs to a different team',
     );
-    await expectConflict(async () =>
-      db.insert(agentRun).values({
-        agentId: agent.id,
-        projectId: source.id,
-        trigger: 'manual',
-        prompt: 'Task',
-      }),
+    await expectConflict(
+      async () =>
+        db.insert(agentRun).values({
+          agentId: agent.id,
+          projectId: source.id,
+          trigger: 'manual',
+          prompt: 'Task',
+        }),
+      'Project agent belongs to a different team',
     );
   });
 });

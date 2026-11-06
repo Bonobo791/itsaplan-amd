@@ -1,10 +1,25 @@
 import type { FeedFilter, FeedOrder } from '@/lib/api/endpoints/activity';
+import type { MentionSource } from '@/lib/api/endpoints/mentions';
+
+const scimKey = (workspaceId: number | null) =>
+  workspaceId === null ? (['god', 'scim'] as const) : (['workspace', workspaceId, 'scim'] as const);
 
 // Query keys shared by every service. Each is a stable tuple; a project/issue id
 // or key scopes its entry. Kept in one registry so a mutation in one service can
 // invalidate another service's queries by the same key.
 export const qk = {
+  receivedInvites: ['receivedInvites'] as const,
+  receivedInvitesPage: (userId: string, email: string, params: unknown) =>
+    ['receivedInvites', userId, email, params] as const,
+  externalRunTrace: (runId: number) => ['externalRunTrace', runId] as const,
+  runnerQueue: ['runnerQueue'] as const,
+  issueAgentRuns: (issueId: number) => ['issueAgentRuns', issueId] as const,
+  issueAgentRunTrace: (issueId: number, runId: number, traceId?: string) =>
+    ['issueAgentRuns', issueId, 'trace', runId, traceId ?? null] as const,
+  internalRunTrace: (runId: number) => ['internalRunTrace', runId] as const,
   projects: ['projects'] as const,
+  // Under projects, so what refreshes the project list refreshes every search with it.
+  projectSearch: (filters: unknown) => ['projects', 'search', filters] as const,
   teams: ['teams'] as const,
   // One team: its counters and what the caller may do with what it holds.
   team: (teamId: number) => ['team', teamId] as const,
@@ -15,12 +30,25 @@ export const qk = {
   workspaceManagers: (workspaceId: number) => ['workspace', workspaceId, 'managers'] as const,
   workspaceManagerCandidates: (workspaceId: number, search: string) =>
     ['workspace', workspaceId, 'managers', 'candidates', search] as const,
-  workspaceScim: (workspaceId: number) => ['workspace', workspaceId, 'scim'] as const,
-  workspaceScimGroups: (workspaceId: number) =>
-    ['workspace', workspaceId, 'scim', 'groups'] as const,
-  workspaceProjectOptions: (workspaceId: number) =>
-    ['workspace', workspaceId, 'projectOptions'] as const,
+  scim: scimKey,
+  scimGroups: (workspaceId: number | null) => [...scimKey(workspaceId), 'groups'] as const,
+  scimProjects: (workspaceId: number | null) => [...scimKey(workspaceId), 'projects'] as const,
   teamProjectDefaults: (teamId: number) => ['team', teamId, 'project-defaults'] as const,
+  // The project templates of a workspace and those its teams see share one root, since
+  // saving or deleting one changes the lists of every team.
+  projectTemplates: ['project-templates'] as const,
+  teamProjectTemplates: (teamId: number) => ['project-templates', 'team', teamId] as const,
+  teamProjectTemplate: (teamId: number, templateId: number) =>
+    ['project-templates', 'team', teamId, templateId] as const,
+  workspaceProjectTemplates: (workspaceId: number) =>
+    ['project-templates', 'workspace', workspaceId] as const,
+  workspaceProjectTemplate: (workspaceId: number, templateId: number) =>
+    ['project-templates', 'workspace', workspaceId, templateId] as const,
+  importedTemplatePreview: (workspaceId: number, template: unknown) =>
+    ['project-templates', 'workspace', workspaceId, 'import', template] as const,
+  projectTemplatePreview: (workspaceId: number, projectId: number, include: unknown) =>
+    ['project-templates', 'workspace', workspaceId, 'preview', projectId, include] as const,
+  templatePublisher: (workspaceId: number) => ['template-publisher', workspaceId] as const,
   // The members of a team and the projects it owns, each read by its own section. A
   // page is scoped by the search term and the window it was read with.
   teamMembers: (teamId: number, params: unknown) => ['team', teamId, 'members', params] as const,
@@ -55,6 +83,8 @@ export const qk = {
   archivedIssues: (projectKey: string) => ['archivedIssues', projectKey] as const,
   // Command-palette issue search, scoped to a project and the search term.
   issueSearch: (projectKey: string, q: string) => ['issueSearch', projectKey, q] as const,
+  issueSearchAll: (q: string, excludeProjectId: number | null) =>
+    ['issueSearchAll', q, excludeProjectId] as const,
   // The project's auto-archive thresholds and subtask automations (the
   // Configuration settings section).
   autoArchive: (projectKey: string) => ['autoArchive', projectKey] as const,
@@ -78,6 +108,9 @@ export const qk = {
   // The same preview for one Linear team's workflow states.
   linearPreview: (projectKey: string, teamId: string) =>
     ['linearPreview', projectKey, teamId] as const,
+  // The same preview for one Trello board's lists and members.
+  trelloPreview: (projectKey: string, boardId: string) =>
+    ['trelloPreview', projectKey, boardId] as const,
   // Saved dashboards (the analytics tabs) and the read-only metrics behind their
   // widgets. `kind` names the metric (stats/pulse/throughput/breakdown/...) and
   // `params` scopes it to the widget's query (window, filters).
@@ -95,6 +128,19 @@ export const qk = {
     ['documents', projectKey, 'document', documentId, 'assets'] as const,
   documentIssueLinks: (projectKey: string, documentId: number) =>
     ['documents', projectKey, 'document', documentId, 'issues'] as const,
+  // Who the "@" menu offers where a mention is written. A document's sits under the
+  // document, so what refreshes the document refreshes it too.
+  mentionCandidates: (source: MentionSource) =>
+    source.on === 'document'
+      ? ([
+          'documents',
+          source.projectKey,
+          'document',
+          source.documentId,
+          'mentions',
+          source.place,
+        ] as const)
+      : (['mentionCandidates', source.projectKey, source.place] as const),
   issueDocumentLinks: (projectKey: string, issueId: number) =>
     ['documents', projectKey, 'issue', issueId] as const,
   initiativeDocumentLinks: (projectKey: string, initiativeId: number) =>
@@ -109,6 +155,15 @@ export const qk = {
     ['noteBoards', projectKey, 'board', boardId] as const,
   noteBoardAccessCandidates: (projectKey: string) =>
     ['noteBoards', projectKey, 'accessCandidates'] as const,
+  agentAnalytics: (teamId: number, days: number, projectId: number | null) =>
+    ['agentAnalytics', teamId, days, projectId] as const,
+  workspaceAgentAnalytics: (workspaceId: number, days: number) =>
+    ['workspaceAgentAnalytics', workspaceId, days] as const,
+  // The model prices of a workspace: the models it uses, and pages of the built-in table.
+  modelPrices: (workspaceId: number) => ['modelPrices', workspaceId] as const,
+  usedModelPrices: (workspaceId: number) => ['modelPrices', workspaceId, 'used'] as const,
+  modelPriceCatalog: (workspaceId: number, params: unknown) =>
+    ['modelPrices', workspaceId, 'catalog', params] as const,
   analytics: (projectKey: string, kind: string, params?: unknown) =>
     ['analytics', projectKey, kind, params ?? {}] as const,
   analyticsForProject: (projectKey: string) => ['analytics', projectKey] as const,
@@ -128,6 +183,9 @@ export const qk = {
   // The invites of a team, including the ones into its projects.
   teamInvites: (teamId: number) => ['teamInvites', teamId] as const,
   anyTeamInvites: ['teamInvites'] as const,
+  inviteCandidates: (teamId: number, search: string) =>
+    ['teamInvites', teamId, 'candidates', search] as const,
+  inviteSearch: ['inviteSearch'] as const,
   // The roles a team offers, which is what every project of it assigns from. The
   // permission catalog is app-static, so it is scoped to no team.
   teamRoles: (teamId: number, params: unknown) => ['teamRoles', teamId, params] as const,
@@ -141,6 +199,8 @@ export const qk = {
   // API, so it hangs off the same key with a 'tools' tail.
   aiAgents: (teamId: number, projectId?: number) =>
     ['aiAgents', teamId, projectId ?? 'all'] as const,
+  agentDirectory: (teamId: number, projectId: number) =>
+    ['aiAgents', teamId, projectId, 'directory'] as const,
   anyAiAgents: ['aiAgents'] as const,
   teamAiAgents: (teamId: number) => ['aiAgents', teamId] as const,
   agentTools: (teamId: number) => ['aiAgents', teamId, 'tools'] as const,
@@ -149,6 +209,8 @@ export const qk = {
     ['aiAgents', teamId, agentId, 'skills'] as const,
   // An agent's triggered run history (the runs sidebar).
   agentRuns: (teamId: number, agentId: number) => ['aiAgents', teamId, agentId, 'runs'] as const,
+  invocationSecret: (teamId: number, agentId: number) =>
+    ['aiAgents', teamId, agentId, 'invocationSecret'] as const,
   agentSchedules: (projectKey: string) => ['agentSchedules', projectKey] as const,
   // One page of them: the window scopes the entry.
   agentSchedulePage: (projectKey: string, params: unknown) =>
@@ -264,14 +326,20 @@ export const qk = {
   notifications: (projectKey: string, filters?: unknown) =>
     ['notifications', projectKey, filters ?? {}] as const,
   notificationsUnread: (projectKey: string) => ['notificationsUnread', projectKey] as const,
+  // The unread count across every project (the app icon badge).
+  notificationsUnreadTotal: ['notificationsUnreadTotal'] as const,
   // The signed-in user's WebAuthn passkeys (account security page).
   passkeys: ['passkeys'] as const,
+  // The OAuth applications the signed-in user authorized (account security page).
+  connectedApps: ['connectedApps'] as const,
   // The signed-in user's connected external accounts (accounts page): the linked
   // Telegram account, and the auth providers better-auth reports.
   telegramAccount: ['telegramAccount'] as const,
   linkedAccounts: ['linkedAccounts'] as const,
   // The instance sign-in policy, including which social providers are configured.
   authConfig: ['authConfig'] as const,
+  // The name an MCP client registered with, shown on the OAuth consent page.
+  oauthClientName: (clientId: string) => ['oauthClientName', clientId] as const,
   // The signed-in user's personal API keys (API keys page).
   apiKeys: ['apiKeys'] as const,
   // The signed-in user's interface preferences (timezone, theme, issue open mode,
@@ -285,7 +353,13 @@ export const qk = {
   instanceOidcSettings: ['instanceOidcSettings'] as const,
   instanceTelegramSettings: ['instanceTelegramSettings'] as const,
   instanceProjectDefaults: ['instanceProjectDefaults'] as const,
+  instanceAgentSettings: ['instanceAgentSettings'] as const,
+  instanceSharingSettings: ['instanceSharingSettings'] as const,
+  instanceEmbedSites: ['instanceEmbedSites'] as const,
+  instanceEmailTemplates: ['instanceEmailTemplates'] as const,
+  instanceEmailPreview: (draft: unknown) => ['instanceEmailPreview', draft] as const,
   instanceStorageSettings: ['instanceStorageSettings'] as const,
+  systemRoles: ['systemRoles'] as const,
   // The upload limits as read by the upload UI (open to any signed-in user).
   storageSettings: ['storageSettings'] as const,
   // The running version (any signed-in user) and the upstream release check (god).

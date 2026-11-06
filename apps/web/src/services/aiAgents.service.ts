@@ -25,12 +25,16 @@ import {
 } from '@/lib/api/endpoints/agentChat';
 import {
   listAiAgents,
+  listProjectAgents,
   listAgentRuns,
   listAgentTools,
   createAiAgent,
   updateAiAgent,
   regenerateAiAgentKey,
   deleteAiAgent,
+  getInvocationSecret,
+  rotateInvocationSecret,
+  testInvocation,
 } from '@/lib/api/endpoints/agents';
 import { qk } from '@/services/queryKeys';
 
@@ -46,6 +50,16 @@ export function useAiAgentsQuery(teamId: number | null, projectId?: number) {
     queryFn: () => listAiAgents(teamId!, projectId),
     enabled: teamId != null,
     refetchInterval: RUNNER_PRESENCE_REFRESH_MS,
+  });
+}
+
+export function useAgentDirectoryQuery(
+  project: { id: number; ref: string; teamId: number } | null,
+) {
+  return useQuery({
+    queryKey: qk.agentDirectory(project?.teamId ?? 0, project?.id ?? 0),
+    queryFn: () => listProjectAgents(project!.ref),
+    enabled: project != null,
   });
 }
 
@@ -273,6 +287,33 @@ export function useRegenerateAiAgentKey(teamId: number | null) {
       if (teamId != null) void qc.invalidateQueries({ queryKey: qk.teamAiAgents(teamId) });
     },
   });
+}
+
+// The key an external agent's invocations are signed with, which only a member who may
+// edit the agent reads. A save that sets the first URL issues it, and saving refetches
+// every agent query, this one included.
+export function useInvocationSecretQuery(teamId: number | null, agentId: number | null) {
+  return useQuery({
+    queryKey: qk.invocationSecret(teamId ?? 0, agentId ?? 0),
+    queryFn: () => getInvocationSecret(teamId!, agentId!),
+    enabled: teamId != null && agentId != null,
+  });
+}
+
+export function useRotateInvocationSecret(teamId: number | null) {
+  const t = useTranslations('teams.agents');
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (agentId: number) => rotateInvocationSecret(teamId!, agentId),
+    onSuccess: (res, agentId) => {
+      toast.success(t('invocationSecretRotated'));
+      if (teamId != null) qc.setQueryData(qk.invocationSecret(teamId, agentId), res);
+    },
+  });
+}
+
+export function useTestInvocation(teamId: number | null) {
+  return useMutation({ mutationFn: (agentId: number) => testInvocation(teamId!, agentId) });
 }
 
 export function useDeleteAiAgent(teamId: number | null) {

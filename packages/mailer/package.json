@@ -8,15 +8,18 @@
   },
   "scripts": {
     "lint": "eslint .",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "nodemailer": "^10.0.14"
+    "juice": "^12.2.1",
+    "marked": "^18.1.1",
+    "nodemailer": "^10.1.0"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
     "@types/bun": "latest",
-    "@types/nodemailer": "^8.0.1",
+    "@types/nodemailer": "^8.0.2",
     "eslint": "^9.39.0",
     "typescript": "^6.0.3"
   }

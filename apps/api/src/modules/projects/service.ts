@@ -37,7 +37,7 @@ import { PROJECT_KEY_PATTERN } from './key';
 import type { Permissions } from '#shared/permissions';
 import { getProjectSetting, setProjectSetting } from '#shared/project-settings';
 import { PROJECT_FEATURES, featureLabel, type ProjectFeature } from '#shared/features';
-import { getTeamLimits } from '#shared/limits';
+import { getLimits, getTeamLimits } from '#shared/limits';
 import { projectAccess, type AccessVia } from '#shared/workspace-roles';
 import { toMemberContext, type MemberRole } from '#modules/members/service';
 import { workspaceGrants } from '#modules/workspaces/service';
@@ -120,6 +120,7 @@ type ProjectWithTeam = typeof project.$inferSelect & {
   teamName: string;
   teamSlug: string | null;
   teamMcpEnabled: boolean;
+  workspaceId: number;
 };
 
 const projectWithTeam = {
@@ -127,13 +128,14 @@ const projectWithTeam = {
   teamName: team.name,
   teamSlug: team.slug,
   teamMcpEnabled: team.mcpEnabled,
+  workspaceId: team.workspaceId,
 };
 
 // A blocked section reads as off whatever the project has stored, so masking here is
 // what turns a feature off everywhere: the web app reads the flags off this DTO, and
 // the route guards read them off the project the guard resolved.
 export async function mapProject(row: ProjectWithTeam): Promise<ProjectRow> {
-  const { blockedFeatures } = await getTeamLimits(row.teamId);
+  const { blockedFeatures } = await getLimits(row.workspaceId);
   const on = (feature: ProjectFeature, stored: boolean) =>
     stored && !blockedFeatures.includes(feature);
   return {
@@ -164,16 +166,49 @@ export async function mapProject(row: ProjectWithTeam): Promise<ProjectRow> {
   };
 }
 
+interface ProjectListOptions {
+  mcpOnly?: boolean;
+  withPermissions?: boolean;
+  q?: string;
+  sort?: 'key' | 'name' | 'created' | 'activity';
+  teamId?: number;
+  workspaceId?: number;
+  ids?: number[];
+  favorite?: boolean;
+  hidden?: boolean;
+  favoritesFirst?: boolean;
+}
+
 export async function listProjects(
   userId: string,
-  opts: {
-    mcpOnly?: boolean;
-    withPermissions?: boolean;
-    q?: string;
-    sort?: 'key' | 'name' | 'created' | 'activity';
-    teamId?: number;
-  } = {},
+  opts: ProjectListOptions = {},
 ): Promise<ProjectListItem[]> {
+  return (await readProjects(userId, opts)).items;
+}
+
+export function searchProjects(
+  userId: string,
+  opts: Omit<ProjectListOptions, 'mcpOnly' | 'withPermissions' | 'favoritesFirst'>,
+  window: { limit: number; offset: number },
+): Promise<{ items: ProjectListItem[]; total: number }> {
+  return readProjects(userId, { ...opts, favoritesFirst: true }, window);
+}
+
+// A project reached through the workspace has no membership row, so its preference
+// columns are null and count as off.
+function preference(
+  column: typeof projectMember.isFavorite | typeof projectMember.isHidden,
+  on?: boolean,
+) {
+  if (on === undefined) return undefined;
+  return on ? eq(column, true) : sql`${column} is not true`;
+}
+
+async function readProjects(
+  userId: string,
+  opts: ProjectListOptions,
+  window?: { limit: number; offset: number },
+): Promise<{ items: ProjectListItem[]; total: number }> {
   const grants = await workspaceGrants(userId);
   const grantedTeams = [...grants.keys()];
   const term = opts.q?.trim().replace(/[\\%_]/g, '\\$&');
@@ -189,6 +224,10 @@ export async function listProjects(
     isNull(project.archivedAt),
     opts.mcpOnly ? and(eq(project.mcpEnabled, true), eq(team.mcpEnabled, true)) : undefined,
     opts.teamId !== undefined ? eq(project.teamId, opts.teamId) : undefined,
+    opts.workspaceId !== undefined ? eq(team.workspaceId, opts.workspaceId) : undefined,
+    opts.ids ? inArray(project.id, opts.ids) : undefined,
+    preference(projectMember.isFavorite, opts.favorite),
+    preference(projectMember.isHidden, opts.hidden),
     term
       ? or(
           ilike(project.key, `%${term}%`),
@@ -230,10 +269,11 @@ export async function listProjects(
     .orderBy(issue.projectId, desc(issueActivity.createdAt))
     .as('latest_activity');
   const order: SQL[] = [];
+  if (opts.favoritesFirst) order.push(sql`${projectMember.isFavorite} is true desc`);
   if (opts.sort === 'activity') order.push(sql`${latestActivity.createdAt} desc nulls last`);
   else if (opts.sort === 'created') order.push(desc(project.createdAt));
   else if (opts.sort === 'name') order.push(sql`lower(${project.name})`);
-  const rows = await db
+  const query = db
     .select({
       ...projectWithTeam,
       memberRole: projectMember.role,
@@ -248,8 +288,20 @@ export async function listProjects(
     .leftJoin(teamRole, eq(teamRole.id, projectMember.roleId))
     .leftJoin(latestActivity, eq(latestActivity.projectId, project.id))
     .where(where)
-    .orderBy(...order, project.key, project.id);
-  return Promise.all(
+    .orderBy(...order, project.key, project.id)
+    .$dynamic();
+  const [rows, counted] = await Promise.all([
+    window ? query.limit(window.limit).offset(window.offset) : query,
+    window
+      ? db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(project)
+          .innerJoin(team, eq(team.id, project.teamId))
+          .leftJoin(projectMember, callerMember)
+          .where(where)
+      : undefined,
+  ]);
+  const items = await Promise.all(
     rows.map(
       async ({ memberRole, rolePermissions, lastActivityAt, isFavorite, isHidden, ...row }) => {
         const member = memberRole
@@ -269,6 +321,7 @@ export async function listProjects(
       },
     ),
   );
+  return { items, total: counted?.[0]?.count ?? items.length };
 }
 
 // Resolves the project a URL names. The full form is "<teamRef>.<key>", where the
@@ -347,10 +400,8 @@ export async function getProjectTeamId(projectId: number): Promise<number> {
   return rows[0].teamId;
 }
 
-// The team a new project belongs to. `teamId` names it explicitly (the caller's
-// rank in it is checked by the route); without one it is the team the caller owns.
-export async function targetTeam(userId: string, teamId?: number): Promise<TargetTeam> {
-  if (teamId == null) return ownedTeam(userId);
+// The team a new project belongs to. The caller's rank in it is checked by the route.
+export async function targetTeam(userId: string, teamId: number): Promise<TargetTeam> {
   const [row] = await db
     .select({
       id: team.id,
@@ -358,6 +409,7 @@ export async function targetTeam(userId: string, teamId?: number): Promise<Targe
       slug: team.slug,
       mcpEnabled: team.mcpEnabled,
       defaultAgentIds: team.defaultAgentIds,
+      workspaceId: team.workspaceId,
     })
     .from(team)
     .where(eq(team.id, teamId));
@@ -384,25 +436,7 @@ export interface TargetTeam {
   slug: string | null;
   mcpEnabled: boolean;
   defaultAgentIds: number[];
-}
-
-// The first team the caller owns. An account has none until it creates one.
-async function ownedTeam(userId: string): Promise<TargetTeam> {
-  const [row] = await db
-    .select({
-      id: team.id,
-      name: team.name,
-      slug: team.slug,
-      mcpEnabled: team.mcpEnabled,
-      defaultAgentIds: team.defaultAgentIds,
-    })
-    .from(teamMember)
-    .innerJoin(team, eq(team.id, teamMember.teamId))
-    .where(and(eq(teamMember.userId, userId), eq(teamMember.role, 'owner')))
-    .orderBy(team.id)
-    .limit(1);
-  if (!row) throw new HttpError(400, 'You do not own a team to create a project in');
-  return row;
+  workspaceId: number;
 }
 
 // Every new project starts with one column per state type, so it's usable (has
@@ -484,6 +518,22 @@ export const ISSUE_TYPE_PRESET_KEYS = Object.keys(ISSUE_TYPE_PRESETS);
 
 export type IssueTypePreset = keyof typeof ISSUE_TYPE_PRESETS;
 
+// The team's default agents as the member rows a new project starts with, on the
+// default role.
+export async function defaultAgentMembers(ownerTeam: {
+  id: number;
+  defaultAgentIds: number[];
+}): Promise<{ userId: string; role: 'member'; roleId: number | null }[]> {
+  if (ownerTeam.defaultAgentIds.length === 0) return [];
+  const agents = await db
+    .select({ userId: aiAgent.userId })
+    .from(aiAgent)
+    .where(and(eq(aiAgent.teamId, ownerTeam.id), inArray(aiAgent.id, ownerTeam.defaultAgentIds)));
+  if (agents.length === 0) return [];
+  const roleId = await getDefaultRoleId();
+  return agents.map((agent) => ({ userId: agent.userId, role: 'member', roleId }));
+}
+
 export async function createProject(
   input: {
     key: string;
@@ -492,21 +542,13 @@ export async function createProject(
     preset?: string;
   },
   ownerId: string,
-  teamId?: number,
+  teamId: number,
 ): Promise<ProjectRow> {
   const ownerTeam = await targetTeam(ownerId, teamId);
   // What a new project starts with, set instance-wide in god mode. Read before the
   // transaction opens so the settings lookup is not part of it.
   const defaults = await getProjectDefaults();
-  const defaultAgents = ownerTeam.defaultAgentIds.length
-    ? await db
-        .select({ userId: aiAgent.userId })
-        .from(aiAgent)
-        .where(
-          and(eq(aiAgent.teamId, ownerTeam.id), inArray(aiAgent.id, ownerTeam.defaultAgentIds)),
-        )
-    : [];
-  const defaultRoleId = defaultAgents.length ? await getDefaultRoleId(ownerTeam.id) : null;
+  const agentMembers = await defaultAgentMembers(ownerTeam);
   return db.transaction(async (tx) => {
     const [row] = await tx
       .insert(project)
@@ -520,15 +562,10 @@ export async function createProject(
       .returning();
     await joinTeamAsCreator(tx, ownerTeam.id, ownerId);
     await tx.insert(projectMember).values({ projectId: row.id, userId: ownerId, role: 'owner' });
-    if (defaultAgents.length) {
-      await tx.insert(projectMember).values(
-        defaultAgents.map((agent) => ({
-          projectId: row.id,
-          userId: agent.userId,
-          role: 'member',
-          roleId: defaultRoleId,
-        })),
-      );
+    if (agentMembers.length > 0) {
+      await tx
+        .insert(projectMember)
+        .values(agentMembers.map((member) => ({ projectId: row.id, ...member })));
     }
     for (const [position, column] of DEFAULT_COLUMNS.entries()) {
       await tx.insert(projectColumn).values({
@@ -557,6 +594,7 @@ export async function createProject(
       teamName: ownerTeam.name,
       teamSlug: ownerTeam.slug,
       teamMcpEnabled: ownerTeam.mcpEnabled,
+      workspaceId: ownerTeam.workspaceId,
     });
   });
 }
@@ -597,7 +635,9 @@ export async function setProjectArchived(
 }
 
 // The project's feature toggles, read from the project row.
-export function projectFeatures(row: ProjectRow): ProjectFeatures {
+export function projectFeatures(
+  row: Pick<ProjectRow, `${keyof ProjectFeatures}Enabled`>,
+): ProjectFeatures {
   return {
     initiatives: row.initiativesEnabled,
     dashboards: row.dashboardsEnabled,
@@ -770,7 +810,6 @@ export async function deleteProject(
     if (!current) throw new HttpError(404, 'Project not found');
     if (expectedTeamId !== undefined && current.teamId !== expectedTeamId)
       throw new HttpError(409, 'The project has moved to another team');
-    await deleteThreadsWhere({ projectId });
     // SCIM team memberships must be reconciled after their project memberships disappear.
     const provisioned = await tx
       .select({ teamId: project.teamId, userId: projectMember.userId })
@@ -804,6 +843,9 @@ export async function deleteProject(
       provisioned,
     };
   });
+  // Outside the transaction: the agent memory store may create its indexes
+  // concurrently on first use, which waits for this transaction to end.
+  await deleteThreadsWhere({ projectId });
   await deleteObjects(assetKeys);
   for (const { teamId, userId } of provisioned) {
     await dropUnusedTeamMembership(teamId, userId);

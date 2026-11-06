@@ -6,6 +6,19 @@ contains the original REST response body, including an empty string for HTTP 204
 clients can continue reading that text. The internal agent runtime keeps its existing result
 format.
 
+## Internal agent project activity
+
+The internal agent's `get_project_activity` result preserves the route's event metadata
+and cursor. Comment bodies and `payload.subject/from/to.value` strings longer than
+1000 UTF-16 code units are shortened to a preview. Each affected event includes
+`truncatedFields: [{ field, originalLength }]`, where `field` is the path of a shortened
+value and `originalLength` uses the same units. A preview never ends with half of a
+surrogate pair.
+
+`list_issue_activity` reads the full historical entries when needed. `get_issue` reads
+the current description, which can differ from a historical description. Stored activity,
+REST/UI responses and external MCP results retain the full text.
+
 ## Attachment urls and images
 
 The body is the REST body with one change: the path of an issue or initiative attachment,
@@ -15,15 +28,20 @@ is never stored. The arguments of a call get the web path back, so a description
 assistant writes keeps `/media/...`. A string argument that is only a url is passed as it
 is. Document assets need a session and keep their paths.
 
-`view_attachment` (one attachment, by its url or id), `view_issue_images` and
-`view_initiative_images` return images as `image` content blocks: PNG, JPEG, GIF and
-WebP, up to 5 MB each, 8 images and 10 MB per call. A text block comes first and names
-the images in order, `{ images: [{ id, filename, contentType }], others: [...] }`, where
-`others` holds every attachment left out, with its url. These three tools advertise no
-`outputSchema` and a successful call has no `structuredContent`: Claude Code gives the
-model `structuredContent` in place of the text block when it is present, which loses the
-names and the urls of the attachments left out, and earlier versions dropped the images as
-well. A failed call has the error envelope below.
+`view_attachment` (one attachment, by its url or id), `view_document_asset` (one file of
+a document, by its id), `view_issue_images` and `view_initiative_images` return images as
+`image` content blocks: PNG, JPEG, GIF and WebP, up to 5 MB each, 8 images and 10 MB per
+call. A text block comes first and names the images in order,
+`{ images: [{ id, filename, contentType }], others: [...] }`, where `others` holds every
+attachment left out, with its url. When `view_attachment` or `view_document_asset` opens a
+file that is not returned as an image, its entry in `others` also carries the content:
+`text` for a PDF or a text file, `table` for a spreadsheet or document. An internal agent
+gets `view_attachment` and, when granted, `view_document_asset`, with the images as image
+parts of the tool result (`toModelOutput` in `runtime/tools/route-tools.ts`). These four
+tools advertise no `outputSchema` and a successful call has no `structuredContent`: Claude
+Code gives the model `structuredContent` in place of the text block when it is present,
+which loses the names and the urls of the attachments left out, and earlier versions dropped
+the images as well. A failed call has the error envelope below.
 
 A successful call returns:
 

@@ -4,11 +4,13 @@
     "preferences": "Preferências",
     "accounts": "Contas",
     "security": "Segurança",
-    "api-keys": "Chaves de API"
+    "api-keys": "Chaves de API",
+    "invitations": "Invitations"
   },
   "godGroups": {
     "management": "Gerenciamento",
-    "instance": "Instância"
+    "instance": "Instância",
+    "security": "Segurança"
   },
   "god": {
     "users": {
@@ -23,9 +25,13 @@
       "label": "Projetos",
       "description": "Todo projeto nesta instância: o que cada um contém, quando esteve ativo pela última vez e quem pode alcançá-lo."
     },
+    "roles": {
+      "label": "Funções do sistema",
+      "description": "Funções padrão disponíveis para todas as equipes desta instância."
+    },
     "general": {
       "label": "Geral",
-      "description": "Workspaces pessoais e padrões para novos projetos."
+      "description": "Workspaces pessoais, padrões para novos projetos, e rastros e tempo de execução de agentes."
     },
     "authentication": {
       "label": "Autenticação",
@@ -38,6 +44,10 @@
     "storage": {
       "label": "Armazenamento",
       "description": "Quanto as pessoas podem enviar: o tamanho de um único arquivo, os tipos de anexo aceitos e o armazenamento que cada projeto recebe."
+    },
+    "email-templates": {
+      "label": "Modelos de e-mail",
+      "description": "Gerencie os modelos de e-mails do sistema."
     },
     "telegram": {
       "label": "Telegram",
@@ -54,6 +64,10 @@
     "scim": {
       "label": "SCIM",
       "description": "Permita que um provedor de identidade crie, atualize e desative contas nesta instância e conceda acesso a projetos por seus grupos."
+    },
+    "audit-log": {
+      "label": "Log de auditoria",
+      "description": "Quem fez o quê nesta instância, quando e de onde."
     }
   },
   "settings": {
@@ -97,6 +111,10 @@
       "label": "Webhooks",
       "description": "Envie eventos do projeto para URLs externas, assinados com um segredo por webhook."
     },
+    "forms": {
+      "label": "Formulários",
+      "description": "Qualquer pessoa com o link cria uma issue aqui."
+    },
     "git": {
       "label": "Repositórios",
       "description": "Feche issues quando seus pull requests mesclam no GitHub, GitLab, Gitea, Forgejo ou Bitbucket."
@@ -108,6 +126,114 @@
     "ai-agents": {
       "label": "Agentes de IA",
       "description": "Agentes de IA trabalhando neste projeto."
+    },
+    "queue": {
+      "label": "Execuções de agentes",
+      "description": "Execuções dos agentes internos e externos do projeto: em andamento, aguardando e anteriores."
+    }
+  },
+  "previews": {
+    "available": "Disponível no Cloud e no Pro auto-hospedado.",
+    "dashboard": {
+      "title": "Dashboard",
+      "description": "A atividade dos times e projetos deste workspace.",
+      "summary": {
+        "teams": "Times",
+        "projects": "Projetos",
+        "people": "Pessoas",
+        "agents": "Agentes de IA",
+        "openIssues": "Issues abertas",
+        "storage": "Armazenamento"
+      },
+      "blocks": {
+        "agents": "Agentes de IA",
+        "schedules": "Execuções agendadas",
+        "time": "Tempo registrado",
+        "flow": "Fluxo de issues",
+        "projects": "Projetos ativos",
+        "teams": "Times ativos"
+      }
+    },
+    "agentBudgets": {
+      "title": "Orçamentos de IA",
+      "description": "Limites para o que os agentes gastam com modelos.",
+      "workspace": "Espaço inteiro",
+      "figures": {
+        "spent": "Gasto",
+        "limit": "Limite",
+        "left": "Resta",
+        "forecast": "Previsão para o período"
+      },
+      "list": "Orçamentos",
+      "columns": {
+        "budget": "Orçamento",
+        "spent": "Gasto"
+      }
+    },
+    "auditLog": {
+      "title": "Log de auditoria",
+      "description": "Quem fez o quê neste workspace, em seus times e projetos, e quando as pessoas entraram.",
+      "columns": {
+        "time": "Horário",
+        "actor": "Quem",
+        "action": "Ação",
+        "where": "Onde",
+        "from": "Origem"
+      }
+    },
+    "emailDomains": {
+      "title": "Domínios de e-mail",
+      "description": "Escolha quais domínios de e-mail podem entrar neste workspace.",
+      "label": "Domínios de e-mail permitidos",
+      "hint": "Só endereços desses domínios podem ser convidados ou adicionados por SCIM, e as pessoas convidadas podem se cadastrar com eles. Deixe vazio para usar os domínios da instância. Os membros atuais mantêm o acesso."
+    },
+    "sso": {
+      "title": "Login único",
+      "description": "Permita que as pessoas deste workspace entrem com o provedor de identidade da sua empresa.",
+      "provider": "Provedor de identidade",
+      "providerHint": "Informe o que seu provedor de identidade fornece e adicione nele os endereços abaixo.",
+      "fields": {
+        "domains": "Domínios de e-mail",
+        "entryPoint": "URL de login",
+        "entityId": "Entity ID do provedor",
+        "certificate": "Certificado de assinatura",
+        "acsUrl": "URL de ACS",
+        "spEntityId": "Entity ID e metadados"
+      }
+    },
+    "forms": {
+      "new": "Novo formulário",
+      "columns": {
+        "form": "Formulário",
+        "link": "Link"
+      },
+      "enabled": "Aceita solicitações",
+      "tabs": {
+        "form": "Formulário",
+        "questions": "Perguntas",
+        "issue": "Issue",
+        "design": "Design"
+      },
+      "questionsHint": "Nome e e-mail são sempre pedidos.",
+      "preview": "Pré-visualização",
+      "name": "Seu nome",
+      "email": "E-mail"
+    },
+    "portal": {
+      "title": "Portal",
+      "description": "A página onde as pessoas enviam solicitações aos projetos do espaço de trabalho e as acompanham.",
+      "general": "Geral",
+      "forms": "Formulários públicos",
+      "formsHint": "Os projetos do espaço de trabalho podem publicar formulários que qualquer pessoa com o link preenche. Desativado, seus formulários e portais deixam de abrir e os projetos perdem a seção Formulários; nada é apagado.",
+      "name": "Nome",
+      "nameHint": "O que as pessoas veem no portal e nos e-mails dele no lugar do nome do espaço de trabalho. Vazio mostra o nome do espaço de trabalho.",
+      "address": "Endereço",
+      "addressHint": "O portal abre neste endereço. Enquanto você não definir um, ele abre pelo número do espaço de trabalho.",
+      "link": "Link do portal",
+      "logo": "Logotipo",
+      "logoHint": "Aparece no portal e nos formulários no lugar do nome do portal. Um logotipo serve para os dois temas.",
+      "light": "Tema claro",
+      "dark": "Tema escuro"
     }
   }
 }

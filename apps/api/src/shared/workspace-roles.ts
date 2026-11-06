@@ -29,10 +29,13 @@ export function readOnlyPermissions(): Permissions {
   return matrix;
 }
 
-const grants = new Map<string, WorkspaceGrant>([
-  ['owner', 'owner'],
-  ['admin', readOnlyPermissions()],
-]);
+// The admin's matrix is built when it is read, so it holds the resources a build adds.
+const builtInGrants = () =>
+  new Map<string, WorkspaceGrant | (() => Permissions)>([
+    ['owner', 'owner'],
+    ['admin', readOnlyPermissions],
+  ]);
+const grants = builtInGrants();
 
 // Sets what a workspace role grants, or with null that it grants nothing. A build that
 // adds roles of its own, or grants the core's differently, calls it at startup.
@@ -41,8 +44,16 @@ export function setWorkspaceRoleGrant(role: string, grant: WorkspaceGrant | null
   else grants.delete(role);
 }
 
+// Puts a role's built-in grant back, after a test or a build has replaced it.
+export function resetWorkspaceRoleGrant(role: string): void {
+  const grant = builtInGrants().get(role);
+  if (grant) grants.set(role, grant);
+  else grants.delete(role);
+}
+
 export function workspaceRoleGrant(role: string): WorkspaceGrant | null {
-  return grants.get(role) ?? null;
+  const grant = grants.get(role) ?? null;
+  return typeof grant === 'function' ? grant() : grant;
 }
 
 export function mergePermissions(...matrices: (Permissions | null | undefined)[]): Permissions {

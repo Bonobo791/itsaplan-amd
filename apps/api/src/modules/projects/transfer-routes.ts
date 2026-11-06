@@ -54,7 +54,7 @@ export const projectTransfers = new Elysia({
       detail: {
         summary: 'Transfer an existing project to a team',
         description:
-          'Move a project within its workspace while preserving its ID, key, work and history. Call preview_project_transfer first. Requires a human owner or manager of both teams and explicit role mappings. projectId and sourceTeamId pin the original project for safe retries. Blocked requests change nothing. Returns the new qualified ref.',
+          'Move a project within its workspace while preserving its ID, key, work and history. Call preview_project_transfer first. Requires a human owner or manager of both teams and explicit role mappings. projectId and sourceTeamId pin the original project for retries while it is still at the destination. Blocked requests change nothing. Returns the new qualified ref.',
         ...mcpTool('transfer_project', {
           readOnlyHint: false,
           destructiveHint: true,

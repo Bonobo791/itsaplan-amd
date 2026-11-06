@@ -1,3 +1,5 @@
+import { db, project, projectMember, team, teamRole } from '@repo/db';
+import { and, eq, inArray, isNull, type SQLWrapper } from 'drizzle-orm';
 import { HttpError } from './lib';
 import {
   getProjectById,
@@ -6,16 +8,35 @@ import {
   type ProjectRow,
 } from '#modules/projects/service';
 import { featureLabel, type ProjectFeature } from './features';
-import { getMemberContext, getTeamPermissions } from '#modules/members/service';
+import {
+  getMemberContext,
+  getProjectPermissions,
+  getTeamPermissions,
+  toMemberContext,
+  type MemberRole,
+} from '#modules/members/service';
 import { getTeamMembership, runsTeam, type TeamStanding } from '#modules/teams/service';
-import { projectWorkspaceGrant, workspaceGrant } from '#modules/workspaces/service';
-import { hasPermission, type PermissionAction, type PermissionResource } from './permissions';
+import {
+  projectWorkspaceGrant,
+  workspaceGrant,
+  workspaceGrants,
+} from '#modules/workspaces/service';
+import {
+  hasPermission,
+  emptyPermissions,
+  resourceActions,
+  PERMISSION_RESOURCES,
+  type PermissionAction,
+  type PermissionResource,
+  type Permissions,
+} from './permissions';
 import {
   mergePermissions,
   projectAccess,
   teamAccess,
   type ProjectAccess,
   type TeamAccess,
+  type WorkspaceGrant,
 } from './workspace-roles';
 
 // The authenticated user carried on the request context. Populated by the
@@ -133,6 +154,42 @@ export async function assertProjectAdmin(
   throw new HttpError(403, 'Only a project owner or a team owner or manager can do this');
 }
 
+// Caps what a member may hand out: the permissions of a role they assign (adding a
+// member, changing a role, inviting, renewing an invite, or copying an invite's link)
+// must not exceed their own. Without this, anyone
+// the member permission lets assign roles could grant a role more powerful than
+// theirs and act through it. A project owner, or an owner or manager of the team
+// (a workspace grant included), bypasses the matrix and may grant any of the team's roles.
+export async function mayGrantPermissions(
+  project: ProjectRow,
+  user: AuthUser | undefined | null,
+  target: Permissions,
+): Promise<boolean> {
+  const current = requireUser(user);
+  if (runsTeam((await getTeamAccess(project.teamId, current.id))?.role ?? null)) return true;
+  const access = await getProjectAccess(project.id, current.id);
+  if (access?.role === 'owner') return true;
+  const granter = access?.permissions ?? emptyPermissions();
+  for (const resource of PERMISSION_RESOURCES) {
+    for (const action of resourceActions(resource)) {
+      if (hasPermission(target, resource, action) && !hasPermission(granter, resource, action)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+export async function assertGrantablePermissions(
+  project: ProjectRow,
+  user: AuthUser | undefined | null,
+  target: Permissions,
+): Promise<void> {
+  if (!(await mayGrantPermissions(project, user, target))) {
+    throw new HttpError(403, 'You cannot grant a role with more permissions than your own');
+  }
+}
+
 // Resolves the :projectKey path param to a project the caller's team runs: an owner
 // or manager of the team that owns it. A copy carries the project's configuration —
 // its webhooks and their signing secrets among it — into a project of the caller's
@@ -165,6 +222,17 @@ export async function requireMemberAdmin(
   if (runsTeam((await getTeamAccess(project.teamId, current.id))?.role ?? null)) return project;
   await assertPermission(project.id, current, resource, action);
   return project;
+}
+
+// Whether the user passes requireMemberAdmin, without throwing.
+export async function checkMemberAdmin(
+  project: ProjectRow,
+  user: AuthUser,
+  resource: PermissionResource,
+  action: PermissionAction,
+): Promise<boolean> {
+  if (runsTeam((await getTeamAccess(project.teamId, user.id))?.role ?? null)) return true;
+  return checkPermission(project.id, user, resource, action);
 }
 
 // Resolves the :projectKey path param for a route acting on one member's own row.
@@ -337,4 +405,82 @@ export async function requireTeamPermission(
     throw new HttpError(403, `You do not have permission to ${action} ${resourceLabel(resource)}`);
   }
   return membership;
+}
+
+// The projects of the team where the member holds the permission, for a team-wide read
+// that shows each member only those. Null is every project: whoever runs the team, or
+// holds the permission through their role in the workspace.
+export async function projectsWithPermission(
+  membership: TeamMembership,
+  resource: PermissionResource,
+  action: PermissionAction,
+): Promise<number[] | null> {
+  if (runsTeam(membership.role)) return null;
+  const access = await getTeamAccess(membership.teamId, membership.userId);
+  if (access?.grant && hasPermission(access.grant, resource, action)) return null;
+  const projects = await getProjectPermissions(membership.teamId, membership.userId);
+  return projects
+    .filter((entry) => hasPermission(entry.permissions, resource, action))
+    .map((entry) => entry.projectId);
+}
+
+// The ids of the projects the user is a member of or reaches through a workspace role,
+// as a subquery. It starts from the user's own memberships and the granted teams, so it
+// reads indexes rather than every project of the instance.
+export function reachedProjectIds(userId: string, grantedTeams: number[]): SQLWrapper {
+  const member = db
+    .select({ id: projectMember.projectId })
+    .from(projectMember)
+    .where(eq(projectMember.userId, userId));
+  if (grantedTeams.length === 0) return member;
+  return member.union(
+    db.select({ id: project.id }).from(project).where(inArray(project.teamId, grantedTeams)),
+  );
+}
+
+// Every project the user reaches, as a member or through their workspace role, where
+// their access holds each permission. mcpOnly keeps the projects open to MCP clients.
+// A caller that already read the user's workspace grants passes them.
+export async function readableProjectIds(
+  userId: string,
+  required: [PermissionResource, PermissionAction][],
+  opts: {
+    mcpOnly?: boolean;
+    includeArchived?: boolean;
+    grants?: Map<number, WorkspaceGrant>;
+  } = {},
+): Promise<number[]> {
+  const grants = opts.grants ?? (await workspaceGrants(userId));
+  const rows = await db
+    .select({
+      id: project.id,
+      teamId: project.teamId,
+      role: projectMember.role,
+      permissions: teamRole.permissions,
+    })
+    .from(project)
+    .innerJoin(team, eq(team.id, project.teamId))
+    .leftJoin(
+      projectMember,
+      and(eq(projectMember.projectId, project.id), eq(projectMember.userId, userId)),
+    )
+    .leftJoin(teamRole, eq(teamRole.id, projectMember.roleId))
+    .where(
+      and(
+        opts.includeArchived ? undefined : isNull(project.archivedAt),
+        opts.mcpOnly ? and(eq(project.mcpEnabled, true), eq(team.mcpEnabled, true)) : undefined,
+        inArray(project.id, reachedProjectIds(userId, [...grants.keys()])),
+      ),
+    );
+  return rows
+    .filter((row) => {
+      const member = row.role ? toMemberContext(row.role as MemberRole, row.permissions) : null;
+      const access = projectAccess(member, grants.get(row.teamId) ?? null);
+      return (
+        access &&
+        required.every(([resource, action]) => hasPermission(access.permissions, resource, action))
+      );
+    })
+    .map((row) => row.id)
+    .sort((a, b) => a - b);
 }

@@ -4,11 +4,13 @@
     "preferences": "Preferences",
     "accounts": "Accounts",
     "security": "Security",
-    "api-keys": "API keys"
+    "api-keys": "API keys",
+    "invitations": "Invitations"
   },
   "godGroups": {
     "management": "Management",
-    "instance": "Instance"
+    "instance": "Instance",
+    "security": "Security"
   },
   "god": {
     "users": {
@@ -23,9 +25,13 @@
       "label": "Projects",
       "description": "Every project on this instance: what each one holds, when it was last active, and who can reach it."
     },
+    "roles": {
+      "label": "System roles",
+      "description": "Default roles available to every team on this instance."
+    },
     "general": {
       "label": "General",
-      "description": "Personal workspaces and defaults for new projects."
+      "description": "Personal workspaces, defaults for new projects, agent traces, and the agent run time limit."
     },
     "authentication": {
       "label": "Authentication",
@@ -38,6 +44,10 @@
     "storage": {
       "label": "Storage",
       "description": "How much people may upload: the size of a single file, the attachment types accepted, and the storage each project gets."
+    },
+    "email-templates": {
+      "label": "Email templates",
+      "description": "Manage system email templates."
     },
     "telegram": {
       "label": "Telegram",
@@ -54,6 +64,10 @@
     "scim": {
       "label": "SCIM",
       "description": "Let an identity provider create, update and deactivate accounts on this instance, and grant project access through its groups."
+    },
+    "audit-log": {
+      "label": "Audit log",
+      "description": "Who did what on this instance, when, and where they did it from."
     }
   },
   "settings": {
@@ -97,6 +111,10 @@
       "label": "Webhooks",
       "description": "Send project events to external URLs, signed with a per-webhook secret."
     },
+    "forms": {
+      "label": "Forms",
+      "description": "Let anyone with a link file an issue here."
+    },
     "git": {
       "label": "Repositories",
       "description": "Close issues when their pull requests merge on GitHub, GitLab, Gitea, Forgejo, or Bitbucket."
@@ -108,6 +126,114 @@
     "ai-agents": {
       "label": "AI Agents",
       "description": "AI agents working in this project."
+    },
+    "queue": {
+      "label": "Agent runs",
+      "description": "Runs of the project's internal and external agents: in progress, waiting and past."
+    }
+  },
+  "previews": {
+    "available": "Available in Cloud and self-hosted Pro.",
+    "dashboard": {
+      "title": "Dashboard",
+      "description": "Activity across the teams and projects of this workspace.",
+      "summary": {
+        "teams": "Teams",
+        "projects": "Projects",
+        "people": "People",
+        "agents": "AI agents",
+        "openIssues": "Open issues",
+        "storage": "Storage"
+      },
+      "blocks": {
+        "agents": "AI agents",
+        "schedules": "Scheduled runs",
+        "time": "Time logged",
+        "flow": "Issue flow",
+        "projects": "Active projects",
+        "teams": "Active teams"
+      }
+    },
+    "agentBudgets": {
+      "title": "AI budgets",
+      "description": "Limits on what agents spend on models.",
+      "workspace": "Whole workspace",
+      "figures": {
+        "spent": "Spent",
+        "limit": "Limit",
+        "left": "Left",
+        "forecast": "Forecast for the period"
+      },
+      "list": "Budgets",
+      "columns": {
+        "budget": "Budget",
+        "spent": "Spent"
+      }
+    },
+    "auditLog": {
+      "title": "Audit log",
+      "description": "Who did what in this workspace, its teams and projects, and when its people signed in.",
+      "columns": {
+        "time": "Time",
+        "actor": "Who",
+        "action": "Action",
+        "where": "Where",
+        "from": "From"
+      }
+    },
+    "emailDomains": {
+      "title": "Email domains",
+      "description": "Choose which email domains can join this workspace.",
+      "label": "Allowed email domains",
+      "hint": "Only addresses at these domains can be invited or added through SCIM, and invited people can sign up with them. Leave empty to use the instance's domains. Current members keep their access."
+    },
+    "sso": {
+      "title": "Single sign-on",
+      "description": "Let people of this workspace sign in with your company's identity provider.",
+      "provider": "Identity provider",
+      "providerHint": "Enter what your identity provider gives you, then add the addresses below to it.",
+      "fields": {
+        "domains": "Email domains",
+        "entryPoint": "Sign-in URL",
+        "entityId": "Provider entity ID",
+        "certificate": "Signing certificate",
+        "acsUrl": "ACS URL",
+        "spEntityId": "Entity ID and metadata"
+      }
+    },
+    "forms": {
+      "new": "New form",
+      "columns": {
+        "form": "Form",
+        "link": "Link"
+      },
+      "enabled": "Takes requests",
+      "tabs": {
+        "form": "Form",
+        "questions": "Questions",
+        "issue": "Issue",
+        "design": "Design"
+      },
+      "questionsHint": "Name and email are always asked.",
+      "preview": "Preview",
+      "name": "Your name",
+      "email": "Email"
+    },
+    "portal": {
+      "title": "Portal",
+      "description": "The page where people send requests to the workspace's projects and follow them.",
+      "general": "General",
+      "forms": "Public forms",
+      "formsHint": "The workspace's projects can publish forms anyone with the link fills in. Off, their forms and portals stop opening and the projects lose their Forms settings; nothing is deleted.",
+      "name": "Name",
+      "nameHint": "What people see on the portal and in its emails in place of the workspace's name. Empty shows the workspace's name.",
+      "address": "Address",
+      "addressHint": "The portal opens at this address. Until you set one, it opens at the workspace's number.",
+      "link": "Portal link",
+      "logo": "Logo",
+      "logoHint": "Shown on the portal and on the forms in place of the portal's name. One logo serves both themes.",
+      "light": "Light theme",
+      "dark": "Dark theme"
     }
   }
 }

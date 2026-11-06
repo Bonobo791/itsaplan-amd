@@ -21,10 +21,11 @@ behaviour made right (patch). See CONTRIBUTING.md.
 
 - [ ] `bun run typecheck` passes
 - [ ] `bun run lint` and `bun run format:check` pass
+- [ ] Developed with an AI agent: `tidy`, `code-review` and `security-audit` from `.agents/skills/` ran on the new code
 - [ ] Tests added or updated for the changed behaviour
 - [ ] Database schema changed: migration generated with `bun run db:generate` and committed
 - [ ] New environment variables documented in `.env.example`
-- [ ] Docs updated (`README.md` or the relevant `AGENTS.md`)
+- [ ] Docs updated (`README.md` or `docs/`). `AGENTS.md` changed only as `docs/dev/agents-md.md` allows
 
 ## Screenshots
 

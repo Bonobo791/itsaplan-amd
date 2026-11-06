@@ -20,6 +20,10 @@
       "title": "Projetos",
       "description": "Os projetos que este time possui."
     },
+    "templates": {
+      "title": "Modelos de projeto",
+      "description": "Configurações salvas a partir das quais novos projetos começam."
+    },
     "members": {
       "title": "Membros do time",
       "description": "Todos no time e os convites ainda abertos."
@@ -51,6 +55,13 @@
     "agents": {
       "title": "Agentes de IA",
       "description": "Os agentes de IA que este time possui e os projetos em que cada um trabalha."
+    },
+    "analytics": {
+      "title": "Consumo",
+      "description": "Quanto os agentes da equipe gastaram com modelos, por agente, projeto e dia."
+    },
+    "queue": {
+      "title": "Execuções de agentes"
     }
   },
   "info": {
@@ -67,15 +78,16 @@
     "leaveHint": "Você mantém os projetos de que é membro. Para entrar de novo, um dono precisa readicioná-lo.",
     "delete": {
       "action": "Excluir equipe",
-      "hint": "Seus membros, funções, convites, habilidades, ferramentas e integrações são excluídos com ela. As pessoas mantêm suas contas e suas outras equipes.",
+      "hint": "Seus membros, funções, modelos de projeto, convites, habilidades, ferramentas e integrações são excluídos com ela. As pessoas mantêm suas contas e suas outras equipes.",
       "blocked": "Exclua primeiro os projetos e os agentes de IA da equipe.",
       "title": "Excluir {name}?",
-      "description": "<strong>{name}</strong> é excluída com seus membros, funções, convites, habilidades, ferramentas e integrações. As pessoas mantêm suas contas e suas outras equipes. Isso não pode ser desfeito.",
+      "description": "<strong>{name}</strong> é excluída com seus membros, funções, modelos de projeto, convites, habilidades, ferramentas e integrações. As pessoas mantêm suas contas e suas outras equipes. Isso não pode ser desfeito.",
       "deleted": "Equipe excluída"
     }
   },
   "columns": {
     "project": "Projeto",
+    "template": "Modelo",
     "owners": "Donos",
     "members": "Membros",
     "created": "Criado",
@@ -91,6 +103,7 @@
     "emailPlaceholder": "nome@exemplo.com",
     "alreadyMember": "{email} já está neste time",
     "alreadyPending": "{email} já tem um convite pendente",
+    "domainNotAllowed": "O domínio de {email} não é permitido nesta instância",
     "refused": "{email} não pôde ser convidado",
     "roleLabel": "Função no time",
     "roleHint": {
@@ -103,11 +116,16 @@
     "joinsProject": "Entra no time e em {project}",
     "copyLink": "Copiar link",
     "copied": "Copiado",
+    "resendEmail": "Enviar e-mail",
+    "resendingEmail": "Enviando…",
     "revokeAction": "Revogar convite",
     "revokeTitle": "Revogar convite de {email}?",
     "revokeConfirm": "Revogar convite",
     "revokeDescription": "O link deixa de funcionar. Você pode convidá-lo de novo depois.",
-    "pending": "Convidado"
+    "pending": "Convidado",
+    "expiredAt": "expirou em {date}",
+    "renew": "Renovar",
+    "renewing": "Renovando…"
   },
   "manage": {
     "label": "Gerenciar times",
@@ -128,9 +146,9 @@
     "search": "Buscar funções",
     "noMatches": "Nenhuma função corresponde a “{query}”.",
     "default": "Padrão",
+    "system": "Do sistema",
     "editAction": "Editar função",
     "deleteAction": "Excluir função",
-    "defaultUndeletable": "A função padrão não pode ser excluída",
     "deleteTitle": "Excluir função \"{name}\"",
     "deleteDescription": "Nada está nesta função. Isso não pode ser desfeito.",
     "deleteInUse": "Esta função ainda está em uso. Escolha a função para a qual tudo nela será movido.",
@@ -144,16 +162,6 @@
     "moveAndDelete": "Mover e excluir",
     "noTargetRole": "Não há outra função para a qual movê-los. Crie uma primeiro.",
     "newRole": "Nova função",
-    "editorTitleEdit": "Editar função",
-    "editorTitleNew": "Nova função",
-    "namePlaceholder": "ex. Colaborador",
-    "resourceColumn": "Recurso",
-    "toggleActionAll": "Alternar {action} para todos os recursos",
-    "toggleGroupAll": "Alternar todas as permissões de {group}",
-    "toggleActionGroup": "Alternar {action} para {group}",
-    "cellAria": "{resource}: {action}",
-    "saveRole": "Salvar função",
-    "createRole": "Criar função",
     "copyRoles": "Copiar funções",
     "pasteRoles": "Colar funções",
     "nothingToCopy": "Nenhuma função personalizada para copiar.",
@@ -170,13 +178,87 @@
       "actions": {
         "create": "Nova",
         "update": "Sobrescrever",
-        "skip": "Ignorar (padrão)"
+        "skip": "Ignorar (função do sistema)"
       }
     },
     "transferErrors": {
       "invalidJson": "A área de transferência não contém JSON válido.",
       "notAnExport": "A área de transferência não contém uma exportação de funções.",
       "empty": "A exportação de funções está vazia."
+    }
+  },
+  "templates": {
+    "empty": "Nenhum modelo de projeto ainda",
+    "emptyHint": "Salve um projeto como modelo para criar novos projetos a partir dele.",
+    "newAction": "Novo modelo",
+    "teams": "Equipes",
+    "allTeams": "Todas as equipes",
+    "noTeams": "Nenhuma equipe",
+    "editAction": "Editar modelo",
+    "editHint": "O conteúdo do modelo continua como foi salvo.",
+    "copyAction": "Copiar modelo",
+    "copied": "Modelo \"{name}\" copiado. Cole-o em outro espaço de trabalho para importá-lo.",
+    "downloadAction": "Baixar",
+    "downloadFailed": "Não foi possível baixar o modelo.",
+    "importAction": "Importar modelo",
+    "deleteAction": "Excluir modelo",
+    "deleteDialog": {
+      "title": "Excluir o modelo \"{name}\"?",
+      "description": "Os projetos criados a partir dele continuam iguais.",
+      "confirm": "Excluir modelo",
+      "galleryNote": "A página dele na galeria também sai do ar."
+    },
+    "panel": {
+      "saved": "Salvo em {date}",
+      "none": "Nenhum",
+      "teams": "Equipes: {teams}"
+    },
+    "publish": {
+      "action": "Publicar",
+      "published": "Publicado",
+      "account": "Conta da galeria",
+      "publishingAs": "Publicando como",
+      "authorProfile": "Perfil do autor",
+      "changeEmail": "Trocar e-mail",
+      "rules": "Regras da galeria",
+      "unlink": "Desvincular workspace",
+      "downloadable": "Qualquer pessoa pode baixar",
+      "private": "Sem issues nem pessoas",
+      "counts": "{states, plural, one {# estado} other {# estados}} · {types, plural, one {# tipo} other {# tipos}} · {fields, plural, one {# campo} other {# campos}}",
+      "by": "por <b>{name}</b>",
+      "authorHint": "Aparece em todos os modelos publicados a partir de {email}.",
+      "authorName": "Autor",
+      "authorUrl": "Link do perfil",
+      "optional": "Opcional",
+      "authorUrlInvalid": "Deve começar com https://",
+      "submit": "Publicar",
+      "update": "Atualizar página",
+      "live": "No ar",
+      "since": "desde {date}",
+      "openPage": "Abrir página",
+      "copyLink": "Copiar link",
+      "linkCopied": "Link copiado",
+      "copyFailed": "Não foi possível copiar o link",
+      "unpublish": "Despublicar",
+      "unpublishConfirm": "Tirar a página do ar?",
+      "unpublishHint": "O link dela vai parar de funcionar.",
+      "keep": "Manter",
+      "publishedToast": "Publicado",
+      "updatedToast": "Página atualizada",
+      "badge": "Público",
+      "badgeHint": "Na galeria desde {date}",
+      "link": {
+        "intro": "Confirme um e-mail uma única vez para este workspace.",
+        "email": "E-mail",
+        "emailHint": "Não aparece publicamente",
+        "agree": "Ao enviar o código, você aceita as <rules>regras da galeria</rules>.",
+        "sendCode": "Enviar código",
+        "codeSent": "Digite o código enviado para {email}",
+        "code": "Código",
+        "confirm": "Confirmar",
+        "resend": "Enviar de novo",
+        "resent": "Novo código enviado"
+      }
     }
   },
   "panel": {
@@ -230,6 +312,8 @@
     "timeout": "Timeout (s)",
     "optional": "Opcional",
     "apiKey": "Chave de API",
+    "from": "Endereço de remetente",
+    "fromHint": "Obrigatório para Resend. Com SMTP, o padrão é o nome de usuário.",
     "telegramBot": "Bot do Telegram",
     "telegramBotHint": "O bot que entrega notificações para todos os projetos do time. Membros escolhem seu próprio chat em suas preferências. O token é armazenado criptografado.",
     "botToken": "Token da API do bot (opcional)",
@@ -369,6 +453,8 @@
     "username": "Nome de usuário",
     "usernamePlaceholder": "ex. bot-triagem",
     "usernameHint": "Letras, dígitos, pontos, hífens e sublinhados. Até 64 caracteres.",
+    "chat": "Chat",
+    "chatHint": "Permite que um membro abra ou continue um chat com este agente. Desativado, ele some do seletor de chat; menções, delegações e agendamentos continuam executando-o.",
     "access": "Disponibilidade",
     "accessHint": "Quem pode dar tarefas a este agente",
     "model": "Modelo",
@@ -400,8 +486,46 @@
     "runDelay": "Esperar antes de começar",
     "runDelayHint": "Tempo para continuar editando a issue antes do agente começar. 0 começa na hora.",
     "minutes": "min",
-    "runner": "Runner",
-    "runnerHint": "O processo na sua máquina que executa as tarefas deste agente",
+    "connection": "Conexão",
+    "connectionHint": "Como o agente recebe as tarefas",
+    "deliveryRunner": "Runner",
+    "deliveryRunnerHint": "Sua máquina pede as tarefas",
+    "deliveryUrl": "Endpoint",
+    "deliveryUrlHint": "Sua URL recebe as tarefas",
+    "invocationUrl": "URL do endpoint",
+    "invocationUrlPlaceholder": "https://example.com/agent",
+    "invocationUrlHint": "Recebe cada tarefa e mensagem de chat como um POST assinado.",
+    "invocationUnsaved": "Salve para enviar as tarefas a esta URL.",
+    "invocationSecretOnSave": "Salve a URL para obter o segredo de assinatura.",
+    "invocationSecret": "Segredo de assinatura",
+    "invocationSecretHint": "Use-o para conferir o cabeçalho X-Itsaplan-Signature.",
+    "invocationSecretRotated": "Segredo de assinatura regenerado",
+    "invocationRotate": "Regenerar segredo",
+    "invocationRotateTitle": "Regenerar o segredo de assinatura?",
+    "invocationRotateMessage": "As requisições para <v>{name}</v> passam a usar o novo segredo na hora. Atualize seu endpoint, ou ele vai recusar as próximas tarefas.",
+    "invocationTest": "Requisição de teste",
+    "invocationTestHint": "Envia um ping assinado para a URL salva.",
+    "invocationTestSend": "Enviar teste",
+    "invocationTestSending": "Enviando…",
+    "invocationTestOk": "Respondeu {status} em {ms} ms",
+    "invocationTestRefused": "Respondeu {status}. Esperado 2xx.",
+    "invocationTestTimeout": "Sem resposta a tempo. Responda primeiro e depois faça o trabalho.",
+    "invocationTestUnreachable": "Não foi possível alcançar o endpoint",
+    "invocationHelpOpen": "Como montar o endpoint",
+    "invocationHelpTitle": "Como receber tarefas em uma URL",
+    "invocationHelpVerify": "Confira a assinatura",
+    "invocationHelpVerifyHint": "HMAC-SHA256 do timestamp, um ponto e o corpo bruto, com o segredo de assinatura como chave. Recuse requisições com mais de cinco minutos.",
+    "invocationHelpAccept": "Responda 2xx na hora",
+    "invocationHelpAcceptHint": "Trabalhe depois de responder. Com qualquer outro status, a tarefa volta mais tarde e uma mensagem de chat falha na hora.",
+    "invocationHelpPayload": "Leia a tarefa",
+    "invocationHelpPayloadHint": "O campo event diz o que chegou: uma tarefa, uma mensagem de chat ou um ping de teste.",
+    "invocationHelpTabRun": "Tarefa",
+    "invocationHelpTabChat": "Mensagem de chat",
+    "invocationHelpTabPing": "Ping de teste",
+    "invocationHelpReport": "Envie o resultado com a chave do agente",
+    "invocationHelpReportHint": "Enquanto trabalha, envie um heartbeat pelo menos a cada 5 minutos. Depois envie o resultado. Você pode enviar uma resposta de chat em partes.",
+    "invocationHelpTest": "Envie uma requisição de teste",
+    "invocationHelpTestHint": "A seção Conexão mostra como o seu endpoint respondeu.",
     "runnerWayCli": "CLI do runner",
     "runnerWayCliHint": "Nosso pacote npm. Aponte-o para um agente de código, ele busca tarefas e reporta de volta. Precisa de um arquivo de configuração com a chave do agente.",
     "runnerWayApi": "Seu próprio código",
@@ -424,7 +548,7 @@
     "runnerHelpTabCustom": "O seu",
     "runnerHelpPiAdapter": "O Pi lê o .mcp.json por meio de uma extensão. Instale-a uma vez: pi install npm:pi-mcp-adapter",
     "runnerHelpCheck": "Verificar se está conectado",
-    "runnerHelpCheckHint": "A seção Runner mostra Online.",
+    "runnerHelpCheckHint": "A seção Conexão mostra Online.",
     "runnerOnline": "Runner online",
     "runnerOffline": "Runner offline",
     "runnerNever": "Nenhum runner ainda",
@@ -432,6 +556,8 @@
     "runnerStateOffline": "Offline",
     "runnerStateNone": "Não conectado",
     "runnerSeen": "Visto há {time}",
+    "runnerStateUrl": "Endpoint",
+    "runnerUrl": "Recebe tarefas na sua URL",
     "actions": "Ações",
     "actionsHint": "O que o agente pode fazer no projeto",
     "searchActions": "Buscar ações",
@@ -461,7 +587,7 @@
     "goToTools": "Ir às Ferramentas",
     "searchTools": "Buscar ferramentas",
     "advanced": "Avançado",
-    "advancedHint": "Amostragem, raciocínio, limite de passos e memória",
+    "advancedHint": "Amostragem, raciocínio, limites de passos e de tempo, e memória",
     "temperature": "Temperatura",
     "reasoningEffort": "Esforço de raciocínio",
     "reasoningEffortDefault": "Padrão do provedor",
@@ -470,6 +596,8 @@
     "reasoningEffortHigh": "Alto",
     "optional": "Opcional",
     "maxSteps": "Máximo de passos",
+    "runTimeout": "Limite de tempo (s)",
+    "runTimeoutDefault": "Máximo da instância",
     "memory": "Memória de conversa",
     "memoryHint": "Lembrar mensagens recentes dentro de um tópico de conversa.",
     "memoryCount": "Lembrar as últimas N mensagens",
@@ -493,6 +621,7 @@
     "endOfHistory": "Fim do histórico",
     "manualTask": "Tarefa manual",
     "scheduledTask": "Tarefa agendada",
+    "documentTask": "Comentário em um documento",
     "failed": "Com falha",
     "task": "Tarefa",
     "error": "Erro",
@@ -587,6 +716,26 @@
       "managers": "O dono e os admins",
       "members": "Todos dos times dele"
     },
+    "runLimit": {
+      "title": "Execuções de agentes simultâneas",
+      "description": "Quantas execuções dos seus agentes rodam ao mesmo tempo. As demais esperam na fila. 0 significa sem limite próprio.",
+      "descriptionCapped": "Quantas execuções dos seus agentes rodam ao mesmo tempo, até {max}. As demais esperam na fila. Com 0, o limite é {max}.",
+      "ownerOnly": "Só o proprietário muda quantas execuções de agentes rodam ao mesmo tempo.",
+      "none": "Sem limite"
+    },
+    "sharing": {
+      "title": "Links públicos",
+      "description": "Se documentos, issues e visualizações deste workspace podem ser compartilhados por link.",
+      "enabled": "Permitir links públicos",
+      "enabledHint": "Desativado, ninguém aqui pode compartilhar e os links existentes deixam de abrir até ser ativado de novo.",
+      "instanceOff": "Os links públicos estão desativados nesta instância.",
+      "teamsOnly": "Somente equipes selecionadas",
+      "teamsOnlyHint": "Somente as equipes abaixo podem compartilhar. Os links das demais equipes deixam de abrir.",
+      "statusOn": "Ligado",
+      "statusOff": "Desligado",
+      "ownerOnly": "Somente o proprietário escolhe quais equipes podem compartilhar.",
+      "saved": "Configurações de links públicos salvas"
+    },
     "managers": {
       "title": "Gestores",
       "description": "O proprietário e os administradores gerenciam o workspace.",
@@ -658,6 +807,56 @@
       "title": "Excluir {name}?",
       "description": "<strong>{name}</strong> e os times dele são excluídos. As pessoas mantêm suas contas e seus outros times. Isso não pode ser desfeito.",
       "deleted": "Workspace excluído"
+    },
+    "agentUsage": {
+      "title": "Consumo de IA",
+      "description": "Quanto os agentes de todas as equipes gastaram com modelos."
+    },
+    "settingsGroup": "Configurações",
+    "modelPrices": {
+      "title": "Preços dos modelos",
+      "description": "O Consumo de IA calcula o custo de cada chamada de modelo com estes preços, por 1M de tokens. Uma mudança também recalcula as chamadas passadas.",
+      "used": {
+        "title": "Em uso neste workspace",
+        "description": "Modelos que seus agentes chamaram nos últimos 90 dias e os que têm o seu preço.",
+        "unpriced": "{count, plural, one {# modelo não tem preço, então as chamadas dele ficam fora do custo.} other {# modelos não têm preço, então as chamadas deles ficam fora do custo.}}",
+        "empty": "Nenhuma chamada de modelo nos últimos 90 dias. Um modelo aparece aqui quando seus agentes o chamam."
+      },
+      "all": {
+        "title": "Todos os modelos",
+        "description": "Preços embutidos. Defina o seu para qualquer modelo.",
+        "search": "Buscar modelos",
+        "noMatch": "Nenhum modelo corresponde a “{query}”."
+      },
+      "columns": {
+        "model": "Modelo",
+        "calls": "Chamadas",
+        "input": "Entrada",
+        "output": "Saída",
+        "cacheRead": "Leitura de cache",
+        "cacheWrite": "Gravação de cache",
+        "price": "Preço"
+      },
+      "source": {
+        "own": "Seu",
+        "builtIn": "Embutido",
+        "none": "Sem preço"
+      },
+      "setPrice": "Definir preço",
+      "edit": "Editar",
+      "setTitle": "Definir preço",
+      "editTitle": "Editar preço",
+      "perMillion": "USD por 1M de tokens.",
+      "builtInPrice": "Embutido: {input} de entrada, {output} de saída.",
+      "noBuiltInPrice": "Este modelo não tem preço embutido.",
+      "sameAsInput": "Igual à entrada",
+      "appliesToPast": "Vale para todas as chamadas deste modelo neste workspace, inclusive as passadas.",
+      "useBuiltIn": "Usar o preço embutido",
+      "removePrice": "Remover preço",
+      "save": "Salvar preço"
+    },
+    "queue": {
+      "title": "Execuções de agentes"
     }
   }
 }

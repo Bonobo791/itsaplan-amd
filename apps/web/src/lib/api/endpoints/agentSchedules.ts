@@ -1,5 +1,5 @@
 import { request } from '@/lib/api/core/client';
-import type { AgentRunStatus } from '@/lib/api/endpoints/agents';
+import type { AgentRun, AgentRunStatus } from '@/lib/api/endpoints/agents';
 import { pageQuery, type Page, type PageParams } from '@/lib/api/core/paging';
 
 // 'cron' runs on its cron; 'status' runs on an issue each time one enters its column.
@@ -32,6 +32,9 @@ export interface AgentSchedule {
   // False when the agent's runner is scoped to another member, who alone may run or
   // stop it.
   canTrigger: boolean;
+  // False for a schedule set up by a build whose type or options this instance lacks:
+  // kept as it is, it starts no run and can only be deleted.
+  supported: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -50,8 +53,10 @@ export interface AgentScheduleInput {
 }
 
 export interface AgentScheduleRun {
+  kind: string;
   id: number;
   status: AgentRunStatus;
+  executionState: AgentRun['executionState'];
   trigger: 'schedule' | 'manual' | 'status' | 'event';
   prompt: string;
   attempts: number;

@@ -1,15 +1,18 @@
 import { db, aiAgent, agentRun, project, projectMember } from '@repo/db';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { HttpError } from '#shared/lib';
 import { type ContextUsage } from '../chat-usage';
 import {
   agentRunConfig,
   deferRun,
-  issueRunTurn,
-  loadThreadContext,
+  runTurn,
+  loadRunThread,
+  markRunExecuting,
   runRetryDelayMs,
   scheduleRunRetry,
 } from '../core/run-queue';
 import { agentRunStarted, recordAgentRunFinished } from '../core/run-activity';
+import { emitRunsFinished } from '../core/run-finished';
 import { runAdmissionDelay } from '../core/run-admission';
 import type { AgentKind } from '../core/service';
 import type { AgentRunTrigger } from '../model';
@@ -49,6 +52,8 @@ export interface RunnerAgent {
   // A chat names all of them in the system prompt; a run names the one it works in.
   projects: RunnerProject[];
   instructions: string | null;
+  // Set when the agent is sent its work rather than drained by a runner.
+  invocationUrl: string | null;
 }
 
 // The agent whose bot user is the caller, or null when the caller is not an agent.
@@ -63,6 +68,7 @@ export async function getRunnerAgent(userId: string): Promise<RunnerAgent | null
       userId: aiAgent.userId,
       username: aiAgent.username,
       instructions: aiAgent.instructions,
+      invocationUrl: aiAgent.invocationUrl,
     })
     .from(aiAgent)
     .where(eq(aiAgent.userId, userId))
@@ -79,6 +85,7 @@ export async function getRunnerAgent(userId: string): Promise<RunnerAgent | null
 }
 
 export interface RunnerRun {
+  traceEvents: boolean;
   id: number;
   trigger: AgentRunTrigger;
   // The task as the agent should read it: the trigger text framed with what started
@@ -96,7 +103,7 @@ export interface RunnerRun {
 
 // The claim's raw row, before framing. The extra people columns exist only to build
 // the prompts and are not handed to the runner.
-type ClaimedRow = Omit<RunnerRun, 'systemPrompt'> & {
+type ClaimedRow = Omit<RunnerRun, 'systemPrompt' | 'traceEvents'> & {
   // The project the run works in, which is what its system prompt names.
   projectId: number;
   projectKey: string;
@@ -108,6 +115,8 @@ type ClaimedRow = Omit<RunnerRun, 'systemPrompt'> & {
   requesterName: string | null;
   requesterUsername: string | null;
   sourceActivityId: number | null;
+  documentId: number | null;
+  sourceDocumentCommentId: string | null;
   scheduleId: number | null;
 };
 
@@ -124,7 +133,12 @@ export async function touchRunner(agentId: number): Promise<void> {
 async function expireExhaustedRuns(agent: RunnerAgent): Promise<void> {
   const rows = await db
     .update(agentRun)
-    .set({ status: 'failed', lastError: 'Runner did not report a result', finishedAt: new Date() })
+    .set({
+      status: 'failed',
+      executionStartedAt: null,
+      lastError: 'Runner did not report a result',
+      finishedAt: new Date(),
+    })
     .where(
       and(
         eq(agentRun.agentId, agent.id),
@@ -133,26 +147,42 @@ async function expireExhaustedRuns(agent: RunnerAgent): Promise<void> {
         sql`${agentRun.nextAttemptAt} <= now()`,
       ),
     )
-    .returning({ issueId: agentRun.issueId });
+    .returning({ id: agentRun.id, issueId: agentRun.issueId });
   for (const row of rows)
     await recordAgentRunFinished({ ...row, agentUserId: agent.userId }, 'failed');
+  await emitRunsFinished(rows.map((row) => row.id));
+}
+
+// An agent with an invocation URL is sent its work, so a runner that claims as well
+// would take tasks the endpoint is meant to get. The endpoint reports through the runner
+// routes too; only the claims are refused.
+export function assertRunnerDrained(agent: RunnerAgent): void {
+  if (agent.invocationUrl) {
+    throw new HttpError(409, 'This agent receives its work at its invocation URL');
+  }
+}
+
+export async function claimRunnerRun(agent: RunnerAgent): Promise<RunnerRun | null> {
+  assertRunnerDrained(agent);
+  await touchRunner(agent.id);
+  return takeNextRun(agent);
 }
 
 // Claims the agent's next due run, or null when it has none. FOR UPDATE SKIP LOCKED
-// keeps two runners on the same key from taking the same run.
-export async function claimRunnerRun(agent: RunnerAgent): Promise<RunnerRun | null> {
+// keeps two claims on the same agent from taking the same run.
+export async function takeNextRun(agent: RunnerAgent): Promise<RunnerRun | null> {
   const agentId = agent.id;
   await expireExhaustedRuns(agent);
-  await touchRunner(agentId);
   const rows = await db.execute(sql`
     UPDATE agent_run r
     SET attempts = r.attempts + 1,
         started_at = coalesce(r.started_at, now()),
+        execution_started_at = NULL,
         next_attempt_at = now() + make_interval(secs => ${agentRunConfig.leaseSeconds()})
     WHERE r.id = (
       SELECT id FROM agent_run q
       WHERE q.agent_id = ${agentId} AND q.status = 'pending' AND q.next_attempt_at <= now()
-        AND ${issueRunTurn}
+        AND ${runTurn}
       ORDER BY q.next_attempt_at, q.id
       FOR UPDATE SKIP LOCKED
       LIMIT 1
@@ -179,6 +209,8 @@ export async function claimRunnerRun(agent: RunnerAgent): Promise<RunnerRun | nu
          LEFT JOIN ai_agent ag ON ag.user_id = u.id
          WHERE i.id = r.issue_id) AS "assigneeUsername",
       r.source_activity_id AS "sourceActivityId",
+      r.document_id AS "documentId",
+      r.source_document_comment_id AS "sourceDocumentCommentId",
       (SELECT actor_name FROM issue_activity a WHERE a.id = r.source_activity_id) AS "requesterName",
       (SELECT COALESCE(u.username, ag.username)
          FROM issue_activity a JOIN "user" u ON u.id = a.actor_user_id
@@ -192,12 +224,11 @@ export async function claimRunnerRun(agent: RunnerAgent): Promise<RunnerRun | nu
     await deferRun(row.id, wait);
     return null;
   }
-  const threadContext = await loadThreadContext(row.sourceActivityId);
   const forPrompt = {
     ...row,
     agentUserId: agent.userId,
     agentUsername: agent.username,
-    threadContext,
+    ...(await loadRunThread(row)),
   };
   // A start that fails is a failed attempt: the run comes back after the retry delay,
   // with the error on it, rather than being handed out half started.
@@ -208,7 +239,8 @@ export async function claimRunnerRun(agent: RunnerAgent): Promise<RunnerRun | nu
     await scheduleRunRetry(row.id, runRetryDelayMs(row.attempts), message);
     return null;
   }
-  return {
+  const result = {
+    traceEvents: true,
     id: row.id,
     trigger: row.trigger,
     prompt: framePrompt(forPrompt),
@@ -221,6 +253,8 @@ export async function claimRunnerRun(agent: RunnerAgent): Promise<RunnerRun | nu
     issueId: row.issueId,
     issueIdentifier: row.issueIdentifier,
   };
+  if (!(await markRunExecuting(row.id, row.attempts))) return null;
+  return result;
 }
 
 // What the agent is told about the run before the task itself: the project the run
@@ -231,7 +265,7 @@ function buildSystemPrompt(agent: RunnerAgent, project: RunnerProject, run: RunF
   const instructions = agent.instructions?.trim();
   return (
     projectPreamble(project) +
-    runModePreamble(run.trigger) +
+    runModePreamble(run) +
     peopleContext(run) +
     (instructions ? `## Instructions\n${instructions}\n` : '')
   );
@@ -241,13 +275,27 @@ function buildSystemPrompt(agent: RunnerAgent, project: RunnerProject, run: RunF
 // can outlive the lease by far, so the runner sends this periodically; without it the
 // run would be handed to another runner mid-flight. False when the run is not this
 // agent's, or is already finished.
-export async function heartbeatRun(agentId: number, runId: number): Promise<boolean> {
+export async function heartbeatRun(
+  agentId: number,
+  runId: number,
+  attempt?: number,
+): Promise<boolean> {
   await touchRunner(agentId);
   const rows = await db
     .update(agentRun)
-    .set({ nextAttemptAt: sql`now() + make_interval(secs => ${agentRunConfig.leaseSeconds()})` })
+    .set({
+      executionStartedAt: sql`coalesce(${agentRun.executionStartedAt}, now())`,
+      nextAttemptAt: sql`now() + make_interval(secs => ${agentRunConfig.leaseSeconds()})`,
+    })
     .where(
-      and(eq(agentRun.id, runId), eq(agentRun.agentId, agentId), eq(agentRun.status, 'pending')),
+      and(
+        eq(agentRun.id, runId),
+        eq(agentRun.agentId, agentId),
+        eq(agentRun.status, 'pending'),
+        attempt == null ? undefined : eq(agentRun.attempts, attempt),
+        isNotNull(agentRun.startedAt),
+        or(isNotNull(agentRun.executionStartedAt), isNull(agentRun.lastError)),
+      ),
     )
     .returning({ id: agentRun.id });
   return rows.length > 0;
@@ -261,6 +309,7 @@ export async function finishRun(
   runId: number,
   result: {
     status: 'success' | 'failed';
+    attempt?: number;
     output?: string | null;
     error?: string | null;
     usage?: ContextUsage | null;
@@ -271,6 +320,7 @@ export async function finishRun(
     .update(agentRun)
     .set({
       status: result.status,
+      executionStartedAt: null,
       output: result.output?.slice(0, 10_000) ?? null,
       lastError: result.status === 'failed' ? (result.error?.slice(0, 500) ?? 'Run failed') : null,
       inputTokens: result.usage?.inputTokens ?? null,
@@ -278,11 +328,17 @@ export async function finishRun(
       finishedAt: new Date(),
     })
     .where(
-      and(eq(agentRun.id, runId), eq(agentRun.agentId, agent.id), eq(agentRun.status, 'pending')),
+      and(
+        eq(agentRun.id, runId),
+        eq(agentRun.agentId, agent.id),
+        eq(agentRun.status, 'pending'),
+        result.attempt == null ? undefined : eq(agentRun.attempts, result.attempt),
+      ),
     )
-    .returning({ issueId: agentRun.issueId });
+    .returning({ id: agentRun.id, issueId: agentRun.issueId });
   const row = rows[0];
   if (!row) return false;
   await recordAgentRunFinished({ ...row, agentUserId: agent.userId }, result.status);
+  await emitRunsFinished([row.id]);
   return true;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { authedApi, type Api } from '#tests/helpers/app';
+import { authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { addProjectMember } from '#tests/helpers/members';
@@ -13,7 +13,7 @@ import { createRole } from '#tests/helpers/roles';
 async function setup() {
   const owner = await signUpTestUser({ name: 'Owner' });
   const asOwner = authedApi(owner.cookie);
-  await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   const view = await asOwner.projects({ projectKey: 'MKT' }).get();
   const columns = view.data!.columns;
   const columnId = columns[0].id;
@@ -110,7 +110,7 @@ describe('initiatives', () => {
     it('rejects an owner and labels from another project before creating', async () => {
       const { asOwner } = await setup();
       const outsider = await signUpTestUser({ name: 'Outsider' });
-      await asOwner.projects.post({ key: 'OPS', name: 'Operations' });
+      await createProject(asOwner, { key: 'OPS', name: 'Operations' });
       const foreignLabel = (
         await asOwner.projects({ projectKey: 'OPS' }).labels.post({ name: 'ops' })
       ).data!;
@@ -324,6 +324,22 @@ describe('initiatives', () => {
       expect(typeof got.data?.health).toBe('string');
     });
 
+    it('leaves out an issue archived unfinished and keeps an archived finished one', async () => {
+      const { asOwner, columnId, doneColumnId } = await setup();
+      const initiative = (await createInitiative(asOwner, { title: 'Q3' })).data!;
+      const scope = asOwner.projects({ projectKey: 'MKT' }).issues;
+      await scope.post({ columnId, title: 'A', initiativeId: initiative.id });
+      const open = (await scope.post({ columnId, title: 'B', initiativeId: initiative.id })).data!;
+      const done = (
+        await scope.post({ columnId: doneColumnId, title: 'C', initiativeId: initiative.id })
+      ).data!;
+      await asOwner.issues({ issueId: open.id }).archive.post();
+      await asOwner.issues({ issueId: done.id }).archive.post();
+
+      const got = await asOwner.initiatives({ initiativeId: initiative.id }).get();
+      expect(got.data?.progress).toMatchObject({ completed: 1, total: 2, canceled: 0 });
+    });
+
     it('links and unlinks an issue through update_issue', async () => {
       const { asOwner, columnId } = await setup();
       const initiative = (await createInitiative(asOwner, { title: 'Q3' })).data!;
@@ -342,7 +358,7 @@ describe('initiatives', () => {
 
     it('rejects linking an issue to an initiative from another project', async () => {
       const { asOwner, columnId } = await setup();
-      await asOwner.projects.post({ key: 'OPS', name: 'Operations' });
+      await createProject(asOwner, { key: 'OPS', name: 'Operations' });
       const otherInitiative = (
         await asOwner.projects({ projectKey: 'OPS' }).initiatives.post({ title: 'Other' })
       ).data!;

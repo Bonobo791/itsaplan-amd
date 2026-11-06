@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { MAX_CONCURRENT_RUNS } from '#modules/settings/service';
 import { TEAM_CREATION } from './service';
 
 export const workspaceParams = t.Object({ workspaceId: t.Numeric() });
@@ -16,6 +17,34 @@ export const updateWorkspaceBody = t.Object({
       description:
         'Who creates teams: the owner alone, the owner and admins, or anyone in its teams. ' +
         'Only the owner changes it.',
+    }),
+  ),
+  maxConcurrentRuns: t.Optional(
+    t.Integer({
+      minimum: 0,
+      maximum: MAX_CONCURRENT_RUNS,
+      description:
+        'Runs of its internal agents in flight at once; the rest wait in the queue. 0 sets ' +
+        'no limit of its own. At most maxConcurrentRunsCap. Only the owner changes it.',
+    }),
+  ),
+  sharingEnabled: t.Optional(
+    t.Boolean({
+      description:
+        'Whether its projects may have public links. Off closes the links it has until it ' +
+        'is on again. Refused while the instance has sharing off.',
+    }),
+  ),
+  sharingTeamsOnly: t.Optional(
+    t.Boolean({
+      description: 'Whether only the teams in sharingTeamIds may share. Only the owner changes it.',
+    }),
+  ),
+  sharingTeamIds: t.Optional(
+    t.Array(t.Integer(), {
+      description:
+        'The teams of this workspace that may share while sharingTeamsOnly is on. Replaces ' +
+        'the list. Only the owner changes it.',
     }),
   ),
 });
@@ -47,10 +76,19 @@ export const WorkspaceResponse = t.Object({
   managerCount: t.Number(),
   color: t.Nullable(t.String()),
   teamCreation: t.UnionEnum([...TEAM_CREATION]),
-  deletion: t.UnionEnum(['allowed', 'instance', 'work'], {
+  maxConcurrentRuns: t.Number(),
+  maxConcurrentRunsCap: t.Number({
+    description: 'The highest maxConcurrentRuns the instance allows it; 0 when it sets none.',
+  }),
+  sharingAvailable: t.Boolean({
+    description: 'Whether the instance allows public links. Off, the settings below do not apply.',
+  }),
+  sharingEnabled: t.Boolean(),
+  sharingTeamsOnly: t.Boolean(),
+  sharingTeams: t.Array(t.Object({ id: t.Number(), name: t.String(), selected: t.Boolean() })),
+  deletion: t.UnionEnum(['allowed', 'work'], {
     description:
-      'Whether the owner may delete it: instance for the instance workspace, which stays; ' +
-      'work while a team of it holds a project or an AI agent.',
+      'Whether the owner may delete it: work while a team of it holds a project or an AI agent.',
   }),
 });
 
@@ -65,54 +103,4 @@ export const WorkspaceManagerListResponse = t.Array(t.Object({ ...person, role: 
 
 export const WorkspaceCandidateListResponse = t.Array(t.Object(person));
 
-export const ScimSettingsResponse = t.Object({
-  enabled: t.Boolean(),
-  hasToken: t.Boolean(),
-  tokenPrefix: t.String(),
-  // Where to point the identity provider. Derived from the API origin, so the UI
-  // shows it rather than asking the owner to assemble it.
-  baseUrl: t.String(),
-});
-
-export const ScimSettingsBody = t.Object({
-  enabled: t.Optional(t.Boolean()),
-});
-
-// The generated token, returned once. It is not stored anywhere it can be read
-// back, so a lost token is replaced rather than recovered.
-export const ScimTokenResponse = t.Object({
-  token: t.String(),
-});
-
-const scimGroupMapping = t.Object({
-  projectId: t.Integer(),
-  role: t.UnionEnum(['owner', 'member']),
-  // Which team_role a member joins on. Null for an owner (owners bypass the
-  // permission matrix) or to fall back to the team's default role.
-  roleId: t.Nullable(t.Integer()),
-});
-
-export const ScimGroupResponse = t.Object({
-  id: t.String(),
-  displayName: t.String(),
-  externalId: t.Nullable(t.String()),
-  memberCount: t.Integer(),
-  mappings: t.Array(
-    t.Intersect([scimGroupMapping, t.Object({ projectKey: t.String(), projectName: t.String() })]),
-  ),
-});
-
-export const ScimGroupMappingsBody = t.Object({
-  mappings: t.Array(scimGroupMapping, { maxItems: 100 }),
-});
-
 export const scimGroupParams = t.Object({ workspaceId: t.Numeric(), groupId: t.String() });
-
-export const WorkspaceProjectOptionListResponse = t.Array(
-  t.Object({
-    id: t.Number(),
-    key: t.String(),
-    name: t.String(),
-    roles: t.Array(t.Object({ id: t.Number(), name: t.String() })),
-  }),
-);

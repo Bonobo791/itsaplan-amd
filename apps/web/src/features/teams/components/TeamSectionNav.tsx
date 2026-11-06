@@ -7,6 +7,8 @@ import {
   BookText,
   Bot,
   ChevronRight,
+  Clock3,
+  Coins,
   FolderKanban,
   GitBranch,
   Info,
@@ -24,7 +26,10 @@ import type { Team } from '@/lib/api/endpoints/teams';
 import { cn } from '@/lib/utils';
 import { teamSectionPath, type TeamSection } from '@/utils/paths';
 import { useTeamQuery } from '@/services/teams.service';
+import { useWorkspacesQuery } from '@/services/workspaces.service';
+import { titlePath, useDocumentTitle } from '@/hooks/useDocumentTitle';
 import {
+  activeNavItem,
   SectionNav,
   sectionNavIdleClass,
   sectionNavItemClass,
@@ -37,11 +42,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 // The sections of the open team, as the page's last rail: the team itself, its
 // projects, the roles they assign from and its members, then the AI group — the
 // integration credentials the agents run on, the agents themselves, the skills they
-// load and the tools they can call — with what MCP clients reach and the notification
-// providers last. The counts come with the team list, so each is shown before its
-// section is opened. A section the caller may not read is left out, and the AI group with it
-// once none of its four is readable. Collapsed, the rail shows the icons of every
-// section, the AI group's included, without the group.
+// load, the tools they can call, the run queue and what they spent — with Git, what MCP
+// clients reach and the notification providers last. The counts come with the team
+// list, so each is shown before its section is opened. A section the caller may not read
+// is left out, and the AI group with it once none of them is readable. Collapsed, the
+// rail shows the icons of every section, the AI group's included, without the group.
 export default function TeamSectionNav({
   team,
   collapsed,
@@ -53,6 +58,7 @@ export default function TeamSectionNav({
 }) {
   const t = useTranslations('teams.sections');
   const tNav = useTranslations('nav');
+  const tScreens = useTranslations('meta.screens');
   const pathname = usePathname();
   const permissions = useTeamQuery(team.id).data?.permissions;
 
@@ -71,13 +77,14 @@ export default function TeamSectionNav({
     };
   }
 
+  const runsTeam = team.role === 'owner' || team.role === 'manager';
+  const managesWorkspace =
+    useWorkspacesQuery().data?.some((w) => w.id === team.workspaceId && w.role !== null) ?? false;
   const top = [
     section('info', t('info.title'), Info),
     section('projects', t('projects.title'), FolderKanban, team.projectCount),
     // The roles are managed by the team's owner and managers, so the section is theirs.
-    ...(team.role === 'owner' || team.role === 'manager'
-      ? [section('roles', t('roles.title'), ShieldCheck, team.roleCount)]
-      : []),
+    ...(runsTeam ? [section('roles', t('roles.title'), ShieldCheck, team.roleCount)] : []),
     section('members', t('members.title'), Users, team.memberCount),
   ];
   const ai = [
@@ -93,15 +100,25 @@ export default function TeamSectionNav({
     ...(permissions?.agent_tools.read
       ? [section('agent-tools', t('agentTools.title'), Wrench, team.toolCount)]
       : []),
+    // The runs of every project, for whoever runs the team or its workspace; everyone else
+    // reads them in each project.
+    ...(runsTeam || managesWorkspace ? [section('queue', t('queue.title'), Clock3)] : []),
+    // Whoever runs the team reads every project there, anyone else the projects where
+    // their role grants agent_usage.
+    ...(runsTeam || permissions?.agent_usage.read
+      ? [section('analytics', t('analytics.title'), Coins)]
+      : []),
   ];
   // The notification providers are the owner's: nobody else reads or writes them.
   const bottom = [
-    ...(team.role === 'owner' || team.role === 'manager' ? [section('git', 'Git', GitBranch)] : []),
+    ...(runsTeam ? [section('git', 'Git', GitBranch)] : []),
     section('mcp', t('mcp.title'), Radio),
     ...(team.role === 'owner' ? [section('notifications', t('notifications.title'), Bell)] : []),
   ];
 
-  const activeId = [...top, ...ai, ...bottom].find((entry) => entry.href === pathname)?.id ?? null;
+  const active = activeNavItem([...top, ...ai, ...bottom], pathname);
+  const activeId = active?.id ?? null;
+  useDocumentTitle(titlePath(team.name, tScreens('teamSettings'), active?.label));
   const aiActive = ai.some((entry) => entry.id === activeId);
   // Null until the user opens or closes the group themselves; until then it follows
   // whichever section is open.
