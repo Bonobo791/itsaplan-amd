@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { db, projectMember, teamInvite, teamMember, agentSchedule, agentRun } from '@repo/db';
+import {
+  db,
+  projectMember,
+  teamInvite,
+  teamMember,
+  agentSchedule,
+  agentRun,
+  gitProviderConnection,
+  gitManagedRepository,
+} from '@repo/db';
 import { and, eq } from 'drizzle-orm';
 import { pgErrorCode } from '#shared/lib';
 import { authedApi, createProject, ownWorkspaceId } from '#tests/helpers/app';
@@ -161,6 +170,49 @@ describe('project transfer database boundaries', () => {
           prompt: 'Task',
         }),
       'Project agent belongs to a different team',
+    );
+  });
+
+  it('rejects a late project member who is not on the project team', async () => {
+    const { source } = await setup();
+    const outsider = await signUpTestUser();
+    await expectConflict(
+      async () =>
+        db.insert(projectMember).values({
+          projectId: source.id,
+          userId: outsider.userId,
+          role: 'member',
+          roleId: null,
+        }),
+      'Project member no longer belongs to its team',
+    );
+  });
+
+  it('rejects a late repository on a connection of another team', async () => {
+    const { source } = await setup();
+    const [connection] = await db
+      .insert(gitProviderConnection)
+      .values({
+        teamId: source.teamId,
+        provider: 'github',
+        baseUrl: 'https://github.com',
+        accountLogin: 'acme',
+        ciphertext: 'x',
+        iv: 'x',
+        authTag: 'x',
+      })
+      .returning({ id: gitProviderConnection.id });
+    await expectConflict(
+      async () =>
+        db.insert(gitManagedRepository).values({
+          projectId: source.id,
+          connectionId: connection.id,
+          externalId: '1',
+          fullName: 'acme/repo',
+          webUrl: 'https://github.com/acme/repo',
+          webhookExternalId: '1',
+        }),
+      'Project repository connection belongs to a different team',
     );
   });
 });

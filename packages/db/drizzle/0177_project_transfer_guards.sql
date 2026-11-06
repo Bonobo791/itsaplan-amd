@@ -1,5 +1,9 @@
 -- Instances that ran this migration under its earlier numbers 0147 or 0150 already have
 -- the function and triggers, so it replaces them.
+-- Every RAISE below uses SQLSTATE 40001 on purpose. A writer that validated the team before
+-- a transfer and commits after it is a stale writer, and the API answers it with a retryable
+-- 409. The static mismatches share that code: routes validate first, so a mismatch that
+-- reaches here is the same race, and a different code would turn it into a 500.
 -- A writer can validate the team before a transfer and commit afterwards. Check
 -- team-bound references against the final project owner, including at transaction
 -- commit: transfer remaps roles and changes the owner in the same transaction.

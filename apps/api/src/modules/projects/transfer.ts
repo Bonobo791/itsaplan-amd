@@ -65,6 +65,8 @@ async function checkTransfer(
     .select({ id: aiAgent.id })
     .from(aiAgent)
     .where(eq(aiAgent.userId, userId));
+  // Backstop: a plain agent is refused by the route guards first. This still catches an
+  // agent whose standing was raised some other way.
   if (agent) throw new HttpError(403, 'Agents cannot transfer projects');
   const [current] = await executor.select().from(project).where(eq(project.id, projectId));
   if (!current) throw new HttpError(404, 'Project not found');

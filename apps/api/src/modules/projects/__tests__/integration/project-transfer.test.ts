@@ -385,8 +385,19 @@ describe('project transfers', () => {
     ).data!;
     const agentApi = apiKeyApi(created.apiKey!);
     const body = { projectId: source.id, sourceTeamId: source.teamId, targetTeamId: target.id };
-    expect((await agentApi.projects({ projectKey: source.ref }).transfer.post(body)).status).toBe(
-      403,
+    // A plain agent is refused before the explicit "Agents cannot transfer" check, which
+    // stays as a backstop for an agent whose standing was raised some other way.
+    const agentPreview = await agentApi
+      .projects({ projectKey: source.ref })
+      .transfer.preview.post({ targetTeamId: target.id });
+    expect(agentPreview.status).toBe(403);
+    expect((agentPreview.error?.value as { error: string }).error).toBe(
+      'Only a team owner or manager can do this',
+    );
+    const agentTransfer = await agentApi.projects({ projectKey: source.ref }).transfer.post(body);
+    expect(agentTransfer.status).toBe(403);
+    expect((agentTransfer.error?.value as { error: string }).error).toBe(
+      'Only an owner or manager of both teams may transfer a project',
     );
     await api.teams({ teamId: target.id }).mcp.patch({ enabled: false });
     const mcpApi = authedApi(user.cookie, { 'x-mcp-loopback': '1' });
@@ -542,14 +553,24 @@ describe('project transfers', () => {
         workspaceId: await ownWorkspaceId(api),
       })
     ).data!;
+    const ids = [target.id, third.id];
     const results = await Promise.all(
-      [target.id, third.id].map((targetTeamId) =>
+      ids.map((targetTeamId) =>
         api
           .projects({ projectKey: source.ref })
           .transfer.post({ targetTeamId, sourceTeamId: source.teamId, projectId: source.id }),
       ),
     );
     expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
-    expect((await api.projects.get()).data?.filter((p) => p.id === source.id)).toHaveLength(1);
+    // Whichever request won, the outcome is decided by the responses, not by arrival order.
+    const win = results.findIndex((r) => r.status === 200);
+    const lose = 1 - win;
+    expect(results[win].data?.teamId).toBe(ids[win]);
+    expect((results[lose].error?.value as { error: string }).error).toBe(
+      'The project has moved to another team',
+    );
+    const moved = (await api.projects({ projectKey: results[win].data!.ref }).get()).data!;
+    expect(moved.project.teamId).toBe(ids[win]);
+    expect(moved.project.teamId).not.toBe(ids[lose]);
   });
 });
