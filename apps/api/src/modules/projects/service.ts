@@ -798,6 +798,17 @@ export async function deleteProject(
   projectId: number,
   expectedTeamId: number | undefined,
 ): Promise<void> {
+  // Threads go before the transaction: the memory store creates its indexes concurrently
+  // on first use, and waits on every open transaction. A request the team check refuses
+  // must not clear them first, so the check runs here too; the transaction re-checks under lock.
+  const [before] = await db
+    .select({ teamId: project.teamId })
+    .from(project)
+    .where(eq(project.id, projectId));
+  if (!before) throw new HttpError(404, 'Project not found');
+  if (expectedTeamId !== undefined && before.teamId !== expectedTeamId)
+    throw new HttpError(409, 'The project has moved to another team');
+  await deleteThreadsWhere({ projectId });
   const { assetKeys, provisioned } = await db.transaction(async (tx) => {
     // Serialize with the final upload quota check. A concurrent upload either
     // commits before these reads or loses its FK race and cleans its S3 object.
@@ -843,9 +854,6 @@ export async function deleteProject(
       provisioned,
     };
   });
-  // Outside the transaction: the agent memory store may create its indexes
-  // concurrently on first use, which waits for this transaction to end.
-  await deleteThreadsWhere({ projectId });
   await deleteObjects(assetKeys);
   for (const { teamId, userId } of provisioned) {
     await dropUnusedTeamMembership(teamId, userId);

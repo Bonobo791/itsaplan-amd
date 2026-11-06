@@ -6,6 +6,7 @@ import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { ensureThread, buildMemory } from '../../runtime/memory';
 import { createAgent } from '#tests/helpers/agents';
+import { deleteProject } from '#modules/projects/service';
 
 // Agent conversation threads live in Mastra's tables, which carry no foreign key of
 // ours, so they are deleted explicitly when what they are bound to goes away: the
@@ -146,6 +147,20 @@ describe('agent thread cleanup', () => {
 
     expect(await threadExists(`chat:${agent.id}:${owner.userId}:t1`)).toBe(false);
     expect(await threadExists(runThread)).toBe(false);
+  });
+
+  it("keeps a project's threads when its delete is refused for a team it no longer has", async () => {
+    const { asOwner, columnId, teamId } = await setup();
+    const agent = await createInternalAgent(asOwner, 'Design Bot', 'design');
+    const issue = await createIssue(asOwner, columnId, 'Ship it');
+    const runThread = await seedIssueThread(agent, issue.id);
+    const projectId = (await asOwner.projects({ projectKey: 'MKT' }).get()).data!.project.id;
+
+    // The team check runs before any thread is cleared, so a refused delete keeps them.
+    const refused = await deleteProject(projectId, teamId + 1).catch((error) => error);
+    expect(refused.status).toBe(409);
+    expect(await threadExists(runThread)).toBe(true);
+    expect((await asOwner.projects({ projectKey: 'MKT' }).get()).status).toBe(200);
   });
 
   it("deletes a schedule's run thread when the schedule is deleted", async () => {
